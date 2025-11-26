@@ -13,8 +13,13 @@ https://docs.djangoproject.com/en/4.1/ref/settings/
 import os
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Load environment variables from .env if present
+load_dotenv(BASE_DIR / '.env')
 
 
 # Quick-start development settings - unsuitable for production
@@ -26,7 +31,14 @@ SECRET_KEY = 'django-insecure-)kg2p*tya+&4ug(&%v75rj(50k%er%_j^h0z%+dtc*)c#csvbf
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['192.168.18.214', 'localhost', '127.0.0.1', '0.0.0.0']
+ALLOWED_HOSTS = [
+    '192.168.18.214',
+    'localhost',
+    '127.0.0.1',
+    '0.0.0.0',
+    'DESKTOP-824PRP9',
+    'desktop-824prp9',
+]
 
 
 # Application definition
@@ -155,3 +167,11 @@ EMAIL_USE_SSL = False
 EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER', 'aliabbas541258@gmail.com')
 EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', 'tebw ouzp unux xbau')
 DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', EMAIL_HOST_USER)
+
+
+
+
+
+
+
+OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')

@@ -332,6 +332,7 @@ class UserProfileSectionSerializer(serializers.ModelSerializer):
         ]
     )
     profile_picture = serializers.ImageField(required=False, allow_null=True)
+    generated_description = serializers.CharField(read_only=True)
 
     class Meta:
         model = UserProfile
@@ -362,7 +363,9 @@ class UserProfileSectionSerializer(serializers.ModelSerializer):
             'profession',
             'profile_picture',
             'blur_photo',
+            'generated_description',
         ]
+        read_only_fields = ['generated_description']
 
     def _as_plain_mapping(self, data):
         if isinstance(data, QueryDict):
@@ -441,12 +444,17 @@ class UserProfileSectionSerializer(serializers.ModelSerializer):
         for section, fields in self.section_field_map.items():
             sectioned[section] = {field: rep.pop(field, None) for field in fields}
 
+        generated_description = rep.pop('generated_description', None)
         sectioned['meta'] = {
             'profile_id': instance.id,
             'user_id': instance.user_id,
             'created_at': instance.created_at.isoformat(),
             'updated_at': instance.updated_at.isoformat(),
         }
+        if generated_description:
+            sectioned['ai_generated_description'] = {
+                'description': generated_description,
+            }
         return sectioned
 
 
@@ -504,6 +512,7 @@ class UserProfileListSerializer(serializers.ModelSerializer):
             'employment_status',
             'profession',
             'profile_picture',
+            'generated_description',
             'created_at',
             'updated_at',
         ]

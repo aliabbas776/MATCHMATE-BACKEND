@@ -4,7 +4,9 @@ from .views import (
     LoginView,
     PasswordResetConfirmView,
     PasswordResetRequestView,
+    ProfileDescriptionView,
     ProfileListView,
+    ProfilePhotoUploadView,
     RegistrationView,
     UserAccountDeleteView,
     UserAccountView,
@@ -20,6 +22,12 @@ urlpatterns = [
     path('account/', UserAccountView.as_view(), name='account'),
     path('account/delete/', UserAccountDeleteView.as_view(), name='account-delete'),
     path('profile/', UserProfileView.as_view(), name='profile'),
+    path(
+        'profile/description/',
+        ProfileDescriptionView.as_view(),
+        name='profile-description',
+    ),
+    path('profile/photo/', ProfilePhotoUploadView.as_view(), name='profile-photo'),
     path('profiles/', ProfileListView.as_view(), name='profile-list'),
 ]
 

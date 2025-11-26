@@ -146,6 +146,7 @@ class UserProfile(models.Model):
     total_brothers = models.PositiveIntegerField(default=0)
     total_sisters = models.PositiveIntegerField(default=0)
     blur_photo = models.BooleanField(default=False)
+    generated_description = models.TextField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

@@ -10,6 +10,9 @@ from django.contrib.auth import get_user_model
 from rest_framework.pagination import PageNumberPagination
 
 from .models import UserProfile
+from django.core.files.base import ContentFile
+
+from .openai_helpers import generate_profile_description, validate_profile_photo
 from .serializers import (
     LoginSerializer,
     PasswordResetConfirmSerializer,
@@ -21,6 +24,17 @@ from .serializers import (
 )
 
 User = get_user_model()
+
+
+def get_or_create_user_profile(user):
+    profile, _ = UserProfile.objects.get_or_create(
+        user=user,
+        defaults={
+            'phone_country_code': '+92',
+            'phone_number': '',
+        },
+    )
+    return profile
 
 
 class RegistrationView(APIView):
@@ -53,8 +67,7 @@ class RegistrationView(APIView):
 
 class LoginView(APIView):
     """
-    Public endpoint used by the mobile app to authenticate users.
-    Returns JWT access and refresh tokens upon successful login.
+    Public endpoint used by the mobile app to authenticate users and report profile status.
     """
 
     authentication_classes = []
@@ -63,32 +76,24 @@ class LoginView(APIView):
 
     def post(self, request):
         serializer = LoginSerializer(data=request.data)
-        if serializer.is_valid():
-            user = serializer.validated_data['user']
-            
-            # Generate JWT tokens
-            refresh = RefreshToken.for_user(user)
-            
-            # Get user profile data
-            profile_picture_url = None
-            if hasattr(user, 'profile') and user.profile.profile_picture:
-                profile_picture_url = request.build_absolute_uri(user.profile.profile_picture.url)
-            
-            data = {
-                'access': str(refresh.access_token),
-                'refresh': str(refresh),
-                'user': {
-                    'id': user.id,
-                    'username': user.username,
-                    'email': user.email,
-                    'first_name': user.first_name,
-                    'last_name': user.last_name,
-                    'phone_number': user.profile.phone_number if hasattr(user, 'profile') else None,
-                    'profile_picture': profile_picture_url,
-                }
-            }
-            return Response(data, status=status.HTTP_200_OK)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        if not serializer.is_valid():
+            return Response(
+                {'success': False, 'errors': serializer.errors},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        user = serializer.validated_data['user']
+        refresh = RefreshToken.for_user(user)
+        has_profile = UserProfile.objects.filter(user=user).exists()
+
+        return Response(
+            {
+                'success': True,
+                'token': str(refresh.access_token),
+                'hasProfile': has_profile,
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class PasswordResetRequestView(APIView):
@@ -139,23 +144,13 @@ class UserProfileView(APIView):
     permission_classes = [IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
-    def _get_profile(self, user):
-        profile, _ = UserProfile.objects.get_or_create(
-            user=user,
-            defaults={
-                'phone_country_code': '+92',
-                'phone_number': '',
-            },
-        )
-        return profile
-
     def get(self, request):
-        profile = self._get_profile(request.user)
+        profile = get_or_create_user_profile(request.user)
         serializer = UserProfileSectionSerializer(profile, context={'request': request})
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     def put(self, request):
-        profile = self._get_profile(request.user)
+        profile = get_or_create_user_profile(request.user)
         serializer = UserProfileSectionSerializer(
             profile,
             data=request.data,
@@ -166,7 +161,7 @@ class UserProfileView(APIView):
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     def post(self, request):
-        profile = self._get_profile(request.user)
+        profile = get_or_create_user_profile(request.user)
         serializer = UserProfileSectionSerializer(
             profile,
             data=request.data,
@@ -191,6 +186,65 @@ class UserProfileView(APIView):
                 {'detail': 'Profile not found.'},
                 status=status.HTTP_404_NOT_FOUND,
             )
+
+
+class ProfileDescriptionView(APIView):
+    """
+    Authenticated endpoint that uses OpenAI to create a short dating app
+    description once the profile is complete.
+    """
+
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        profile = get_or_create_user_profile(request.user)
+        description = generate_profile_description(profile)
+        profile.generated_description = description
+        profile.save(update_fields=['generated_description'])
+        return Response(
+            {'generated_description': description},
+            status=status.HTTP_200_OK,
+        )
+
+
+class ProfilePhotoUploadView(APIView):
+    """
+    Validate and store a single human profile photo using OpenAI Vision.
+    """
+
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request):
+        upload = request.FILES.get('file') or request.FILES.get('photo')
+        if not upload:
+            return Response(
+                {'allowed': False, 'reason': 'No image file was provided.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        image_bytes = upload.read()
+        allowed, reason = validate_profile_photo(image_bytes, upload.name)
+        if not allowed:
+            return Response(
+                {'allowed': False, 'reason': reason},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        profile = get_or_create_user_profile(request.user)
+        profile.profile_picture.save(
+            upload.name,
+            ContentFile(image_bytes),
+            save=True,
+        )
+
+        image_url = request.build_absolute_uri(profile.profile_picture.url)
+        return Response(
+            {'allowed': True, 'reason': 'Photo accepted.', 'profile_picture': image_url},
+            status=status.HTTP_200_OK,
+        )
 
 
 class UserAccountView(APIView):
@@ -289,24 +343,51 @@ class ProfileListView(APIView):
     pagination_class = StandardResultsSetPagination
 
     def get(self, request):
-        """List all user profiles (excluding current user)."""
-        profiles = UserProfile.objects.exclude(user=request.user).select_related('user')
-        
-        # Apply pagination
+        """List profiles that match the logged-in user's preferences."""
+        viewer_profile = get_or_create_user_profile(request.user)
+
+        required_fields = ['gender', 'city', 'caste', 'religion']
+        missing_fields = [field for field in required_fields if not getattr(viewer_profile, field)]
+        if missing_fields:
+            return Response(
+                {
+                    'detail': 'Complete your profile before browsing matches.',
+                    'missing_fields': missing_fields,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        opposite_gender_map = {
+            'male': 'female',
+            'female': 'male',
+        }
+        target_gender = opposite_gender_map.get(viewer_profile.gender.lower())
+        if not target_gender:
+            return Response(
+                {'detail': 'Unsupported gender. Please update your profile.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        profiles = (
+            UserProfile.objects.exclude(user=request.user)
+            .filter(
+                gender=target_gender,
+                city=viewer_profile.city,
+                caste=viewer_profile.caste,
+                religion=viewer_profile.religion,
+            )
+            .select_related('user')
+        )
+
         paginator = StandardResultsSetPagination()
         page = paginator.paginate_queryset(profiles, request)
-        
-        if page is not None:
-            serializer = UserProfileListSerializer(
-                page,
-                many=True,
-                context={'request': request},
-            )
-            return paginator.get_paginated_response(serializer.data)
-        
+
         serializer = UserProfileListSerializer(
-            profiles,
+            page if page is not None else profiles,
             many=True,
             context={'request': request},
         )
+
+        if page is not None:
+            return paginator.get_paginated_response(serializer.data)
         return Response(serializer.data, status=status.HTTP_200_OK)
