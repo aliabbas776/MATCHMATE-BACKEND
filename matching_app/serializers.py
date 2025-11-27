@@ -14,7 +14,8 @@ from django.http import QueryDict
 from django.utils import timezone
 from rest_framework import serializers
 
-from .models import PasswordResetOTP, UserProfile
+from .models import CNICVerification, MatchPreference, PasswordResetOTP, UserProfile
+from .photo_visibility import get_photo_visibility_helper, resolve_profile_picture_url
 
 
 User = get_user_model()
@@ -55,6 +56,15 @@ class RegistrationSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         if attrs['password'] != attrs['confirm_password']:
             raise serializers.ValidationError('Passwords do not match.')
+
+        email = attrs['email']
+        if User.objects.filter(email__iexact=email).exists():
+            raise serializers.ValidationError('An account with this email already exists.')
+
+        username = attrs['username']
+        if User.objects.filter(username__iexact=username).exists():
+            raise serializers.ValidationError('Username is already taken.')
+
         return attrs
 
     def create(self, validated_data):
@@ -288,6 +298,7 @@ class UserProfileSectionSerializer(serializers.ModelSerializer):
                     'weight_kg',
                     'phone_country_code',
                     'phone_number',
+                    'has_disability',
                 ],
             ),
             (
@@ -327,11 +338,13 @@ class UserProfileSectionSerializer(serializers.ModelSerializer):
                 [
                     'profile_picture',
                     'blur_photo',
+                    'is_public',
                 ],
             ),
         ]
     )
     profile_picture = serializers.ImageField(required=False, allow_null=True)
+    has_disability = serializers.BooleanField(required=False)
     generated_description = serializers.CharField(read_only=True)
 
     class Meta:
@@ -363,9 +376,14 @@ class UserProfileSectionSerializer(serializers.ModelSerializer):
             'profession',
             'profile_picture',
             'blur_photo',
+            'is_public',
+            'has_disability',
             'generated_description',
+            'cnic_number',
+            'cnic_verification_status',
+            'cnic_verified_at',
         ]
-        read_only_fields = ['generated_description']
+        read_only_fields = ['generated_description', 'cnic_verification_status', 'cnic_verified_at']
 
     def _as_plain_mapping(self, data):
         if isinstance(data, QueryDict):
@@ -436,15 +454,18 @@ class UserProfileSectionSerializer(serializers.ModelSerializer):
     def to_representation(self, instance):
         rep = super().to_representation(instance)
         request = self.context.get('request')
-        picture = rep.get('profile_picture')
-        if picture and request is not None:
-            rep['profile_picture'] = request.build_absolute_uri(picture)
+        helper = get_photo_visibility_helper(self.context)
+        rep['profile_picture'] = resolve_profile_picture_url(instance, request, helper)
 
         sectioned = OrderedDict()
         for section, fields in self.section_field_map.items():
             sectioned[section] = {field: rep.pop(field, None) for field in fields}
 
         generated_description = rep.pop('generated_description', None)
+        cnic_number = rep.pop('cnic_number', None)
+        cnic_status = rep.pop('cnic_verification_status', None)
+        cnic_verified_at = rep.pop('cnic_verified_at', None)
+
         sectioned['meta'] = {
             'profile_id': instance.id,
             'user_id': instance.user_id,
@@ -454,6 +475,17 @@ class UserProfileSectionSerializer(serializers.ModelSerializer):
         if generated_description:
             sectioned['ai_generated_description'] = {
                 'description': generated_description,
+            }
+        if any([cnic_number, cnic_status, cnic_verified_at]):
+            verified_at = (
+                cnic_verified_at.isoformat()
+                if hasattr(cnic_verified_at, 'isoformat')
+                else cnic_verified_at
+            )
+            sectioned['cnic_verification'] = {
+                'number': cnic_number,
+                'status': cnic_status,
+                'verified_at': verified_at,
             }
         return sectioned
 
@@ -511,7 +543,9 @@ class UserProfileListSerializer(serializers.ModelSerializer):
             'education_level',
             'employment_status',
             'profession',
+            'has_disability',
             'profile_picture',
+            'is_public',
             'generated_description',
             'created_at',
             'updated_at',
@@ -521,7 +555,55 @@ class UserProfileListSerializer(serializers.ModelSerializer):
     def to_representation(self, instance):
         rep = super().to_representation(instance)
         request = self.context.get('request')
-        picture = rep.get('profile_picture')
-        if picture and request is not None:
-            rep['profile_picture'] = request.build_absolute_uri(picture)
+        helper = get_photo_visibility_helper(self.context)
+        rep['profile_picture'] = resolve_profile_picture_url(instance, request, helper)
         return rep
+
+
+class MatchPreferenceSerializer(serializers.ModelSerializer):
+    """Serializer used to persist a user's search preferences."""
+
+    class Meta:
+        model = MatchPreference
+        fields = [
+            'status',
+            'religion',
+            'caste',
+            'country',
+            'city',
+            'employment_status',
+            'profession',
+            'prefers_disability',
+            'min_age',
+            'max_age',
+            'updated_at',
+        ]
+        read_only_fields = ['updated_at']
+
+    def validate(self, attrs):
+        min_age = attrs.get('min_age', getattr(self.instance, 'min_age', None))
+        max_age = attrs.get('max_age', getattr(self.instance, 'max_age', None))
+        if min_age is not None and min_age < 18:
+            raise serializers.ValidationError({'min_age': 'Minimum age cannot be less than 18.'})
+        if max_age is not None and max_age < 18:
+            raise serializers.ValidationError({'max_age': 'Maximum age cannot be less than 18.'})
+        if min_age is not None and max_age is not None and min_age > max_age:
+            raise serializers.ValidationError({'min_age': 'Minimum age cannot exceed maximum age.'})
+        return attrs
+
+
+class CNICVerificationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CNICVerification
+        fields = [
+            'status',
+            'extracted_full_name',
+            'extracted_cnic',
+            'extracted_dob',
+            'extracted_gender',
+            'rejection_reason',
+            'tampering_detected',
+            'blur_score',
+            'updated_at',
+        ]
+        read_only_fields = fields

@@ -1,5 +1,7 @@
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
+from django.db.models import F, Q
 from django.utils import timezone
 
 
@@ -119,6 +121,7 @@ class UserProfile(models.Model):
     phone_country_code = models.CharField(max_length=5, default='+92', blank=True)
     phone_number = models.CharField(max_length=20, blank=True)
     profile_picture = models.ImageField(upload_to='profiles/', blank=True, null=True)
+    is_public = models.BooleanField(default=True)
     candidate_name = models.CharField(max_length=255, blank=True)
     hidden_name = models.BooleanField(default=False)
     date_of_birth = models.DateField(blank=True, null=True)
@@ -146,9 +149,32 @@ class UserProfile(models.Model):
     total_brothers = models.PositiveIntegerField(default=0)
     total_sisters = models.PositiveIntegerField(default=0)
     blur_photo = models.BooleanField(default=False)
+    has_disability = models.BooleanField(default=False)
     generated_description = models.TextField(blank=True, null=True)
+
+    #CNIC Verification
+    cnic_number = models.CharField(max_length=15, blank=True)
+    cnic_verification_status = models.CharField(
+        max_length=20,
+        choices=[
+            ('unverified', 'Unverified'),
+            ('pending', 'Pending'),
+            ('verified', 'Verified'),
+            ('rejected', 'Rejected'),
+        ],
+        default='unverified',
+    )
+    cnic_verified_at = models.DateTimeField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    @property
+    def is_completed(self) -> bool:
+        """
+        Return True when the user has filled the minimum fields required for matching.
+        """
+        required_fields = ['candidate_name', 'gender', 'city', 'caste', 'religion']
+        return all(bool(getattr(self, field)) for field in required_fields)
 
     def __str__(self):
         return f"{self.user.username}'s profile"
@@ -173,3 +199,110 @@ class PasswordResetOTP(models.Model):
 
     def __str__(self):
         return f'OTP for {self.user.email} ({self.code})'
+
+
+class MatchPreference(models.Model):
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='match_preference',
+    )
+    status = models.CharField(
+        max_length=15,
+        choices=MaritalStatus.choices,
+        blank=True,
+    )
+    religion = models.CharField(max_length=100, choices=Religion.choices, blank=True)
+    caste = models.CharField(max_length=100, choices=Caste.choices, blank=True)
+    country = models.CharField(max_length=100, choices=Country.choices, blank=True)
+    city = models.CharField(max_length=100, choices=City.choices, blank=True)
+    employment_status = models.CharField(
+        max_length=30,
+        choices=EmploymentStatus.choices,
+        blank=True,
+    )
+    profession = models.CharField(max_length=120, choices=Profession.choices, blank=True)
+    prefers_disability = models.BooleanField(
+        null=True,
+        blank=True,
+        help_text='Set to true to include only users with a disability, false to exclude them, leave blank for any.',
+    )
+    min_age = models.PositiveIntegerField(null=True, blank=True)
+    max_age = models.PositiveIntegerField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def clean(self):
+        if self.min_age and self.max_age and self.min_age > self.max_age:
+            raise ValidationError('Minimum age cannot exceed maximum age.')
+
+    def save(self, *args, **kwargs):
+        self.full_clean(exclude=None)
+        return super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f'MatchPreference<{self.user_id}>'
+
+
+class CNICVerification(models.Model):
+    class Status(models.TextChoices):
+        PENDING = 'pending', 'Pending'
+        VERIFIED = 'verified', 'Verified'
+        REJECTED = 'rejected', 'Rejected'
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='cnic_verification',
+    )
+    front_image = models.ImageField(upload_to='cnic/front/')
+    back_image = models.ImageField(upload_to='cnic/back/')
+    extracted_full_name = models.CharField(max_length=255, blank=True)
+    extracted_cnic = models.CharField(max_length=20, blank=True)
+    extracted_dob = models.DateField(blank=True, null=True)
+    extracted_gender = models.CharField(max_length=10, blank=True)
+    status = models.CharField(max_length=10, choices=Status.choices, default=Status.PENDING)
+    rejection_reason = models.TextField(blank=True)
+    blur_score = models.FloatField(blank=True, null=True)
+    tampering_detected = models.BooleanField(default=False)
+    updated_at = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f'CNICVerification<{self.user_id}> {self.status}'
+
+
+class UserConnection(models.Model):
+    class Status(models.TextChoices):
+        PENDING = 'pending', 'Pending'
+        APPROVED = 'approved', 'Approved'
+        BLOCKED = 'blocked', 'Blocked'
+
+    from_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='connections_sent',
+    )
+    to_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='connections_received',
+    )
+    status = models.CharField(max_length=15, choices=Status.choices, default=Status.PENDING)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['from_user', 'to_user'],
+                name='unique_connection_request',
+            ),
+            models.CheckConstraint(
+                check=~Q(from_user=F('to_user')),
+                name='prevent_self_connection',
+            ),
+        ]
+        ordering = ['-updated_at']
+
+    def __str__(self):
+        return f'Connection<{self.from_user_id}->{self.to_user_id}> {self.status}'

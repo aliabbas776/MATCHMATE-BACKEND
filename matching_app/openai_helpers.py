@@ -143,7 +143,7 @@ def _serialize_image_to_data_uri(image_bytes: bytes, filename: str | None = None
     encoded = base64.b64encode(image_bytes).decode('ascii')
     return f'data:{mime_type};base64,{encoded}'
 
-
+# Human Detection
 def _vision_prompt_instructions() -> str:
     return (
         "You are an automated trust & safety reviewer for dating profile photos. "
@@ -162,6 +162,27 @@ def _vision_user_request() -> str:
         "cartoons/anime, filters, deepfakes, NSFW/explicit nudity, or anything unsafe. "
         "Respond using ONLY strict JSON in the following shape:\n"
         '{"allowed": true|false, "reason": "short explanation"}'
+    )
+
+# User Verification through CNIC
+def _cnic_system_prompt() -> str:
+    return (
+        "You are verifying Pakistani CNIC (Computerized National Identity Card) documents. "
+        "Read the images carefully and extract the printed details. "
+        "If any field is missing or illegible, return null for that field rather than guessing."
+    )
+
+
+def _cnic_user_request() -> str:
+    return (
+        "Extract the following fields and respond ONLY with strict JSON:\n"
+        '{"full_name": string|null, '
+        '"cnic_number": "#####-#######-#"|null, '
+        '"date_of_birth": "YYYY-MM-DD"|null, '
+        '"gender": "male"|"female"|null, '
+        '"raw_front_text": string, '
+        '"raw_back_text": string}\n'
+        "Use the first image as the FRONT side and the second as the BACK side."
     )
 
 
@@ -244,4 +265,79 @@ def validate_profile_photo(image_bytes: bytes, filename: str | None = None) -> T
 
     raw_text = _extract_text_from_response(response)
     return _parse_validation_result(raw_text)
+
+
+def _parse_cnic_payload(raw_text: str) -> dict:
+    if not raw_text:
+        raise APIException('OpenAI Vision returned an empty CNIC response.')
+    match = re.search(r'\{.*\}', raw_text, re.DOTALL)
+    candidate = match.group(0) if match else raw_text
+    try:
+        parsed = json.loads(candidate)
+    except json.JSONDecodeError as exc:
+        raise APIException(f'OpenAI Vision returned non-JSON CNIC data: {raw_text}') from exc
+
+    def _clean(value):
+        if value is None:
+            return None
+        if isinstance(value, str):
+            value = value.strip()
+            return value or None
+        return value
+
+    return {
+        'full_name': _clean(parsed.get('full_name')),
+        'cnic_number': _clean(parsed.get('cnic_number')),
+        'date_of_birth': _clean(parsed.get('date_of_birth')),
+        'gender': (_clean(parsed.get('gender')) or '').lower() or None,
+        'raw_front_text': parsed.get('raw_front_text') or parsed.get('front_text') or '',
+        'raw_back_text': parsed.get('raw_back_text') or parsed.get('back_text') or '',
+    }
+
+
+def extract_cnic_details_from_images(
+    front_image_bytes: bytes,
+    back_image_bytes: bytes,
+    front_filename: str | None = None,
+    back_filename: str | None = None,
+) -> dict:
+    """
+    Extract CNIC metadata using OpenAI Vision.
+    """
+    api_key = _get_openai_api_key()
+    if not api_key:
+        raise APIException(
+            'OpenAI API key is not configured. '
+            'Set the OPENAI_API_KEY env variable to enable CNIC verification.'
+        )
+
+    client = openai.OpenAI(api_key=api_key)
+    front_data_uri = _serialize_image_to_data_uri(front_image_bytes, front_filename)
+    back_data_uri = _serialize_image_to_data_uri(back_image_bytes, back_filename)
+
+    try:
+        response = client.responses.create(
+            model=VISION_MODEL,
+            input=[
+                {
+                    'role': 'system',
+                    'content': [
+                        {'type': 'input_text', 'text': _cnic_system_prompt()},
+                    ],
+                },
+                {
+                    'role': 'user',
+                    'content': [
+                        {'type': 'input_text', 'text': _cnic_user_request()},
+                        {'type': 'input_image', 'image_url': front_data_uri},
+                        {'type': 'input_image', 'image_url': back_data_uri},
+                    ],
+                },
+            ],
+        )
+    except Exception as exc:
+        raise APIException(f'Failed to extract CNIC details: {exc}')
+
+    raw_text = _extract_text_from_response(response)
+    return _parse_cnic_payload(raw_text)
 

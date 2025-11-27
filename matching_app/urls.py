@@ -1,12 +1,15 @@
 from django.urls import path
 
 from .views import (
+    CNICVerificationView,
     LoginView,
+    MatchPreferenceView,
     PasswordResetConfirmView,
     PasswordResetRequestView,
     ProfileDescriptionView,
     ProfileListView,
     ProfilePhotoUploadView,
+    ProfileSearchView,
     RegistrationView,
     UserAccountDeleteView,
     UserAccountView,
@@ -28,6 +31,9 @@ urlpatterns = [
         name='profile-description',
     ),
     path('profile/photo/', ProfilePhotoUploadView.as_view(), name='profile-photo'),
+    path('cnic/verify/', CNICVerificationView.as_view(), name='cnic-verify'),
+    path('preferences/', MatchPreferenceView.as_view(), name='match-preferences'),
     path('profiles/', ProfileListView.as_view(), name='profile-list'),
+    path('profiles/search/', ProfileSearchView.as_view(), name='profile-search'),
 ]
 
