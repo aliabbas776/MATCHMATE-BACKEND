@@ -175,3 +175,10 @@ DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', EMAIL_HOST_USER)
 
 
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')  # required for AI profile text + CNIC OCR
+
+# Zoom API Configuration
+ZOOM_ACCOUNT_ID = os.getenv('ZOOM_ACCOUNT_ID')
+ZOOM_CLIENT_ID = os.getenv('ZOOM_CLIENT_ID')
+ZOOM_CLIENT_SECRET = os.getenv('ZOOM_CLIENT_SECRET')
+ZOOM_BASE_URL = 'https://api.zoom.us/v2'
+ZOOM_OAUTH_URL = 'https://zoom.us/oauth/token'

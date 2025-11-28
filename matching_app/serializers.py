@@ -10,11 +10,20 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.core import signing
 from django.core.mail import send_mail
+from django.db.models import Q
 from django.http import QueryDict
 from django.utils import timezone
 from rest_framework import serializers
 
-from .models import CNICVerification, MatchPreference, PasswordResetOTP, UserProfile
+from . import models
+from .models import (
+    CNICVerification,
+    MatchPreference,
+    Message,
+    PasswordResetOTP,
+    UserConnection,
+    UserProfile,
+)
 from .photo_visibility import get_photo_visibility_helper, resolve_profile_picture_url
 
 
@@ -96,9 +105,9 @@ class LoginSerializer(serializers.Serializer):
 
         if email and password:
             # Try to get user by email (case-insensitive)
-            try:
-                user = User.objects.get(email__iexact=email)
-            except User.DoesNotExist:
+            # Use filter().first() to handle cases where multiple users exist with same email
+            user = User.objects.filter(email__iexact=email).first()
+            if not user:
                 raise serializers.ValidationError('Invalid email or password.')
 
             # Check if user is active
@@ -605,5 +614,833 @@ class CNICVerificationSerializer(serializers.ModelSerializer):
             'tampering_detected',
             'blur_score',
             'updated_at',
+        ]
+        read_only_fields = fields
+
+
+class ConnectionUserSummarySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ['id', 'username', 'first_name', 'last_name']
+
+
+class UserConnectionSerializer(serializers.ModelSerializer):
+    connection_id = serializers.IntegerField(source='id', read_only=True)
+    friend = serializers.SerializerMethodField()
+    direction = serializers.SerializerMethodField()
+
+    class Meta:
+        model = UserConnection
+        fields = ['id', 'connection_id', 'status', 'created_at', 'updated_at', 'friend', 'direction']
+
+    def _resolve_friend(self, obj):
+        request = self.context.get('request')
+        request_user = getattr(request, 'user', None)
+        if request_user and obj.from_user_id == request_user.id:
+            return obj.to_user
+        if request_user and obj.to_user_id == request_user.id:
+            return obj.from_user
+        return obj.to_user
+
+    def get_friend(self, obj):
+        friend = self._resolve_friend(obj)
+        serializer = ConnectionUserSummarySerializer(friend)
+        return serializer.data
+
+    def get_direction(self, obj):
+        request = self.context.get('request')
+        request_user = getattr(request, 'user', None)
+        if request_user and obj.from_user_id == request_user.id:
+            return 'sent'
+        if request_user and obj.to_user_id == request_user.id:
+            return 'received'
+        return 'unknown'
+
+
+class ConnectionRequestSerializer(serializers.Serializer):
+    to_user_id = serializers.PrimaryKeyRelatedField(
+        source='to_user',
+        queryset=User.objects.filter(is_active=True),
+    )
+
+    def validate(self, attrs):
+        request_user = self.context['request'].user
+        to_user = attrs['to_user']
+
+        if request_user == to_user:
+            raise serializers.ValidationError({'to_user_id': 'You cannot connect with yourself.'})
+
+        existing_qs = UserConnection.objects.filter(
+            Q(from_user=request_user, to_user=to_user) | Q(from_user=to_user, to_user=request_user)
+        )
+
+        active = existing_qs.filter(
+            status__in=[UserConnection.Status.PENDING, UserConnection.Status.APPROVED]
+        ).first()
+        if active:
+            message = (
+                'You are already connected with this user.'
+                if active.status == UserConnection.Status.APPROVED
+                else 'A pending request already exists between these users.'
+            )
+            raise serializers.ValidationError({'to_user_id': message})
+
+        attrs['recycled_connection'] = existing_qs.filter(
+            status=UserConnection.Status.REJECTED
+        ).order_by('-updated_at').first()
+        return attrs
+
+    def create(self, validated_data):
+        request_user = self.context['request'].user
+        to_user = validated_data['to_user']
+        recycled = validated_data.pop('recycled_connection', None)
+        if recycled:
+            recycled.from_user = request_user
+            recycled.to_user = to_user
+            recycled.status = UserConnection.Status.PENDING
+            recycled.save(update_fields=['from_user', 'to_user', 'status', 'updated_at'])
+            return recycled
+        return UserConnection.objects.create(from_user=request_user, to_user=to_user)
+
+
+class ConnectionAcceptSerializer(serializers.Serializer):
+    connection_id = serializers.IntegerField()
+
+    def validate(self, attrs):
+        request_user = self.context['request'].user
+        connection_id = attrs['connection_id']
+        try:
+            connection = UserConnection.objects.select_related('from_user', 'to_user').get(
+                id=connection_id,
+                status=UserConnection.Status.PENDING,
+                to_user=request_user,
+            )
+        except UserConnection.DoesNotExist:
+            raise serializers.ValidationError(
+                {'connection_id': 'Pending request not found or already processed.'}
+            )
+        attrs['connection'] = connection
+        return attrs
+
+    def save(self, **kwargs):
+        connection = self.validated_data['connection']
+        connection.status = UserConnection.Status.APPROVED
+        connection.save(update_fields=['status', 'updated_at'])
+        return connection
+
+
+class ConnectionRejectSerializer(serializers.Serializer):
+    connection_id = serializers.IntegerField()
+
+    def validate(self, attrs):
+        request_user = self.context['request'].user
+        connection_id = attrs['connection_id']
+        try:
+            connection = UserConnection.objects.select_related('from_user', 'to_user').get(
+                id=connection_id,
+                status=UserConnection.Status.PENDING,
+                to_user=request_user,
+            )
+        except UserConnection.DoesNotExist:
+            raise serializers.ValidationError(
+                {'connection_id': 'Pending request not found or already processed.'}
+            )
+        attrs['connection'] = connection
+        return attrs
+
+    def save(self, **kwargs):
+        connection = self.validated_data['connection']
+        connection.status = UserConnection.Status.REJECTED
+        connection.save(update_fields=['status', 'updated_at'])
+        return connection
+
+
+class ConnectionCancelSerializer(serializers.Serializer):
+    connection_id = serializers.IntegerField()
+
+    def validate(self, attrs):
+        request_user = self.context['request'].user
+        connection_id = attrs['connection_id']
+        try:
+            connection = UserConnection.objects.get(
+                id=connection_id,
+                status=UserConnection.Status.PENDING,
+                from_user=request_user,
+            )
+        except UserConnection.DoesNotExist:
+            raise serializers.ValidationError(
+                {'connection_id': 'Pending request not found or already processed.'}
+            )
+        attrs['connection'] = connection
+        return attrs
+
+    def save(self, **kwargs):
+        connection = self.validated_data['connection']
+        connection_id = connection.id
+        connection.delete()
+        return connection_id
+
+
+class ConnectionRemoveSerializer(serializers.Serializer):
+    connection_id = serializers.IntegerField()
+
+    def validate(self, attrs):
+        request_user = self.context['request'].user
+        connection_id = attrs['connection_id']
+        try:
+            connection = UserConnection.objects.select_related('from_user', 'to_user').get(
+                id=connection_id,
+                status=UserConnection.Status.APPROVED,
+            )
+        except UserConnection.DoesNotExist:
+            raise serializers.ValidationError(
+                {'connection_id': 'Connection not found or already removed.'}
+            )
+
+        if connection.from_user_id != request_user.id and connection.to_user_id != request_user.id:
+            raise serializers.ValidationError(
+                {'connection_id': 'You do not have permission to modify this connection.'}
+            )
+
+        attrs['connection'] = connection
+        return attrs
+
+    def save(self, **kwargs):
+        connection = self.validated_data['connection']
+        connection_id = connection.id
+        connection.delete()
+        return connection_id
+
+
+class MessageUserSerializer(serializers.ModelSerializer):
+    """Serializer for user information in messages."""
+    class Meta:
+        model = User
+        fields = ['id', 'username', 'first_name', 'last_name']
+
+
+class MessageSerializer(serializers.ModelSerializer):
+    """Serializer for individual messages."""
+    sender = MessageUserSerializer(read_only=True)
+    receiver = MessageUserSerializer(read_only=True)
+
+    class Meta:
+        model = Message
+        fields = ['id', 'sender', 'receiver', 'content', 'is_read', 'created_at']
+        read_only_fields = ['id', 'sender', 'receiver', 'is_read', 'created_at']
+
+
+class MessageCreateSerializer(serializers.Serializer):
+    """Serializer for creating a new message."""
+    receiver_id = serializers.IntegerField()
+    content = serializers.CharField(required=True, max_length=5000)
+
+    def validate_receiver_id(self, value):
+        """Validate that the receiver exists and is active."""
+        try:
+            receiver = User.objects.get(id=value)
+        except User.DoesNotExist:
+            # Check if this might be a UserProfile ID instead
+            try:
+                profile = UserProfile.objects.get(id=value)
+                user_id = profile.user_id
+                raise serializers.ValidationError(
+                    f'ID {value} is a UserProfile ID. Please use the User ID instead. '
+                    f'For UserProfile ID {value}, the User ID is {user_id}.'
+                )
+            except UserProfile.DoesNotExist:
+                pass
+            
+            raise serializers.ValidationError(f'User with ID {value} does not exist.')
+        
+        if not receiver.is_active:
+            raise serializers.ValidationError(f'User with ID {value} is inactive.')
+        
+        # Store receiver in context for use in validate method
+        if not hasattr(self, '_validated_receivers'):
+            self._validated_receivers = {}
+        self._validated_receivers[value] = receiver
+        
+        return value
+
+    def validate(self, attrs):
+        request_user = self.context['request'].user
+        receiver_id = attrs['receiver_id']
+        
+        # Get receiver from cache if available, otherwise fetch it
+        if hasattr(self, '_validated_receivers') and receiver_id in self._validated_receivers:
+            receiver = self._validated_receivers[receiver_id]
+        else:
+            try:
+                receiver = User.objects.get(id=receiver_id, is_active=True)
+            except User.DoesNotExist:
+                raise serializers.ValidationError({'receiver_id': f'User with ID {receiver_id} does not exist or is inactive.'})
+
+        if request_user == receiver:
+            raise serializers.ValidationError({'receiver_id': 'You cannot message yourself.'})
+
+        # Check if there's an approved connection between sender and receiver
+        connection_exists = UserConnection.objects.filter(
+            Q(from_user=request_user, to_user=receiver) | Q(from_user=receiver, to_user=request_user),
+            status=UserConnection.Status.APPROVED
+        ).exists()
+
+        if not connection_exists:
+            raise serializers.ValidationError(
+                {'receiver_id': 'You cannot message this user unless you are friends.'}
+            )
+
+        attrs['receiver'] = receiver
+        attrs['sender'] = request_user
+        return attrs
+
+    def create(self, validated_data):
+        return Message.objects.create(**validated_data)
+
+
+class ConversationListSerializer(serializers.Serializer):
+    """Serializer for listing conversations with latest message."""
+    user = MessageUserSerializer()
+    latest_message = MessageSerializer()
+    unread_count = serializers.IntegerField()
+
+
+class MessageMarkReadSerializer(serializers.Serializer):
+    """Serializer for marking messages as read."""
+    message_id = serializers.IntegerField(required=False)
+    conversation_user_id = serializers.IntegerField(required=False)
+
+    def validate(self, attrs):
+        request_user = self.context['request'].user
+        message_id = attrs.get('message_id')
+        conversation_user_id = attrs.get('conversation_user_id')
+
+        if not message_id and not conversation_user_id:
+            raise serializers.ValidationError(
+                'Either message_id or conversation_user_id must be provided.'
+            )
+
+        if message_id and conversation_user_id:
+            raise serializers.ValidationError(
+                'Provide either message_id or conversation_user_id, not both.'
+            )
+
+        if message_id:
+            try:
+                message = Message.objects.get(id=message_id, receiver=request_user)
+            except Message.DoesNotExist:
+                raise serializers.ValidationError({'message_id': 'Message not found.'})
+            attrs['message'] = message
+
+        if conversation_user_id:
+            try:
+                other_user = User.objects.get(id=conversation_user_id, is_active=True)
+            except User.DoesNotExist:
+                raise serializers.ValidationError(
+                    {'conversation_user_id': 'User not found.'}
+                )
+            # Verify they are friends
+            connection_exists = UserConnection.objects.filter(
+                Q(from_user=request_user, to_user=other_user) | Q(from_user=other_user, to_user=request_user),
+                status=UserConnection.Status.APPROVED
+            ).exists()
+            if not connection_exists:
+                raise serializers.ValidationError(
+                    {'conversation_user_id': 'You cannot mark messages as read for this user unless you are friends.'}
+                )
+            attrs['other_user'] = other_user
+
+        return attrs
+
+
+# Session Serializers
+class SessionUserSerializer(serializers.ModelSerializer):
+    """Serializer for user information in sessions."""
+    class Meta:
+        model = User
+        fields = ['id', 'username', 'first_name', 'last_name']
+
+
+class SessionSerializer(serializers.ModelSerializer):
+    """Serializer for viewing session details."""
+    initiator = SessionUserSerializer(read_only=True)
+    participant = SessionUserSerializer(read_only=True)
+    started_by = SessionUserSerializer(read_only=True)
+    can_join = serializers.SerializerMethodField()
+    is_initiator = serializers.SerializerMethodField()
+
+    class Meta:
+        model = models.Session
+        fields = [
+            'id',
+            'initiator',
+            'participant',
+            'status',
+            'started_by',
+            'zoom_meeting_id',
+            'zoom_meeting_url',
+            'zoom_meeting_password',
+            'initiator_ready',
+            'participant_ready',
+            'can_join',
+            'is_initiator',
+            'started_at',
+            'ended_at',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = fields
+
+    def get_can_join(self, obj):
+        request = self.context.get('request')
+        if request and request.user.is_authenticated:
+            return obj.can_join(request.user)
+        return False
+
+    def get_is_initiator(self, obj):
+        request = self.context.get('request')
+        if request and request.user.is_authenticated:
+            return obj.initiator_id == request.user.id
+        return False
+
+
+class SessionCreateSerializer(serializers.Serializer):
+    """Serializer for creating a new session."""
+    participant_id = serializers.IntegerField(required=True)
+
+    def validate_participant_id(self, value):
+        """Validate that the participant exists and is active."""
+        try:
+            participant = User.objects.get(id=value, is_active=True)
+        except User.DoesNotExist:
+            raise serializers.ValidationError(f'User with ID {value} does not exist or is inactive.')
+        return value
+
+    def validate(self, attrs):
+        request_user = self.context['request'].user
+        participant_id = attrs['participant_id']
+        
+        try:
+            participant = User.objects.get(id=participant_id, is_active=True)
+        except User.DoesNotExist:
+            raise serializers.ValidationError({'participant_id': f'User with ID {participant_id} does not exist or is inactive.'})
+
+        if request_user.id == participant_id:
+            raise serializers.ValidationError({'participant_id': 'You cannot create a session with yourself.'})
+
+        # Check if there's an approved connection (friends)
+        connection_exists = models.UserConnection.objects.filter(
+            Q(from_user=request_user, to_user=participant) | Q(from_user=participant, to_user=request_user),
+            status=models.UserConnection.Status.APPROVED
+        ).exists()
+
+        if not connection_exists:
+            raise serializers.ValidationError(
+                {'participant_id': 'You can only create sessions with approved friends.'}
+            )
+
+        attrs['participant'] = participant
+        attrs['initiator'] = request_user
+        return attrs
+
+    def create(self, validated_data):
+        initiator = validated_data['initiator']
+        participant = validated_data['participant']
+        
+        session = models.Session.objects.create(
+            initiator=initiator,
+            participant=participant,
+            status=models.Session.Status.PENDING,
+        )
+        
+        # Create audit log
+        models.SessionAuditLog.objects.create(
+            session=session,
+            user=initiator,
+            event_type=models.SessionAuditLog.EventType.CREATED,
+            message=f'Session created by {initiator.username}',
+        )
+        
+        return session
+
+
+class SessionStartSerializer(serializers.Serializer):
+    """Serializer for starting a session (generating Zoom link)."""
+    session_id = serializers.IntegerField()
+
+    def validate_session_id(self, value):
+        """Validate that the session exists."""
+        try:
+            session = models.Session.objects.select_related('initiator', 'participant').get(id=value)
+        except models.Session.DoesNotExist:
+            raise serializers.ValidationError(f'Session with ID {value} does not exist.')
+        return value
+
+    def validate(self, attrs):
+        request_user = self.context['request'].user
+        session_id = attrs['session_id']
+        
+        try:
+            session = models.Session.objects.select_related('initiator', 'participant').get(id=session_id)
+        except models.Session.DoesNotExist:
+            raise serializers.ValidationError({'session_id': f'Session with ID {session_id} does not exist.'})
+
+        # Verify user is a participant
+        if request_user not in [session.initiator, session.participant]:
+            raise serializers.ValidationError(
+                {'session_id': 'You are not a participant in this session.'}
+            )
+
+        # Check session status
+        if session.status != models.Session.Status.PENDING:
+            raise serializers.ValidationError(
+                {'session_id': f'Cannot start session. Current status: {session.status}.'}
+            )
+
+        attrs['session'] = session
+        return attrs
+
+    def save(self, **kwargs):
+        from .zoom_helpers import create_zoom_meeting
+        
+        session = self.validated_data['session']
+        request_user = self.context['request'].user
+        
+        # Generate Zoom meeting
+        meeting_id, join_url, password = create_zoom_meeting(
+            topic=f"Session: {session.initiator.username} & {session.participant.username}",
+            duration_minutes=60,
+        )
+        
+        # Update session
+        session.zoom_meeting_id = meeting_id
+        session.zoom_meeting_url = join_url
+        session.zoom_meeting_password = password
+        session.status = models.Session.Status.ACTIVE
+        session.started_at = timezone.now()
+        session.started_by = request_user
+        session.save(update_fields=[
+            'zoom_meeting_id',
+            'zoom_meeting_url',
+            'zoom_meeting_password',
+            'status',
+            'started_at',
+            'started_by',
+            'updated_at',
+        ])
+        
+        # Create audit log
+        models.SessionAuditLog.objects.create(
+            session=session,
+            user=request_user,
+            event_type=models.SessionAuditLog.EventType.STARTED,
+            message=f'Session started by {request_user.username}. Zoom link generated.',
+            metadata={
+                'zoom_meeting_id': meeting_id,
+                'initiated_by': request_user.id,
+            },
+        )
+        
+        models.SessionAuditLog.objects.create(
+            session=session,
+            user=request_user,
+            event_type=models.SessionAuditLog.EventType.ZOOM_LINK_GENERATED,
+            message=f'Zoom meeting link generated: {join_url}',
+            metadata={
+                'zoom_meeting_id': meeting_id,
+            },
+        )
+        
+        return session
+
+
+class SessionReadySerializer(serializers.Serializer):
+    """Serializer for marking a participant as ready."""
+    session_id = serializers.IntegerField()
+
+    def validate_session_id(self, value):
+        """Validate that the session exists."""
+        try:
+            session = models.Session.objects.select_related('initiator', 'participant').get(id=value)
+        except models.Session.DoesNotExist:
+            raise serializers.ValidationError(f'Session with ID {value} does not exist.')
+        return value
+
+    def validate(self, attrs):
+        request_user = self.context['request'].user
+        session_id = attrs['session_id']
+        
+        try:
+            session = models.Session.objects.select_related('initiator', 'participant').get(id=session_id)
+        except models.Session.DoesNotExist:
+            raise serializers.ValidationError({'session_id': f'Session with ID {session_id} does not exist.'})
+
+        # Verify user is a participant
+        if request_user not in [session.initiator, session.participant]:
+            raise serializers.ValidationError(
+                {'session_id': 'You are not a participant in this session.'}
+            )
+
+        # Check session status
+        if session.status != models.Session.Status.ACTIVE:
+            raise serializers.ValidationError(
+                {'session_id': f'Cannot mark ready. Session status: {session.status}.'}
+            )
+
+        attrs['session'] = session
+        return attrs
+
+    def save(self, **kwargs):
+        session = self.validated_data['session']
+        request_user = self.context['request'].user
+        
+        # Mark user as ready
+        session.mark_ready(request_user)
+        
+        # Create audit log
+        models.SessionAuditLog.objects.create(
+            session=session,
+            user=request_user,
+            event_type=models.SessionAuditLog.EventType.READY,
+            message=f'{request_user.username} is ready to join the session.',
+        )
+        
+        return session
+
+
+class SessionJoinTokenSerializer(serializers.Serializer):
+    """Serializer for generating a join token."""
+    session_id = serializers.IntegerField()
+
+    def validate_session_id(self, value):
+        """Validate that the session exists."""
+        try:
+            session = models.Session.objects.select_related('initiator', 'participant').get(id=value)
+        except models.Session.DoesNotExist:
+            raise serializers.ValidationError(f'Session with ID {value} does not exist.')
+        return value
+
+    def validate(self, attrs):
+        request_user = self.context['request'].user
+        session_id = attrs['session_id']
+        
+        try:
+            session = models.Session.objects.select_related('initiator', 'participant').get(id=session_id)
+        except models.Session.DoesNotExist:
+            raise serializers.ValidationError({'session_id': f'Session with ID {session_id} does not exist.'})
+
+        # Verify user is a participant
+        if request_user not in [session.initiator, session.participant]:
+            raise serializers.ValidationError(
+                {'session_id': 'You are not a participant in this session.'}
+            )
+
+        # Check session status
+        if session.status != models.Session.Status.ACTIVE:
+            raise serializers.ValidationError(
+                {'session_id': f'Cannot generate join token. Session status: {session.status}.'}
+            )
+
+        attrs['session'] = session
+        return attrs
+
+    def save(self, **kwargs):
+        import secrets
+        
+        session = self.validated_data['session']
+        request_user = self.context['request'].user
+        
+        # Generate secure token
+        token = secrets.token_urlsafe(32)
+        expires_at = timezone.now() + timedelta(hours=1)  # Token valid for 1 hour
+        
+        # Create join token
+        join_token = models.SessionJoinToken.objects.create(
+            session=session,
+            user=request_user,
+            token=token,
+            expires_at=expires_at,
+        )
+        
+        return join_token
+
+
+class SessionJoinTokenValidateSerializer(serializers.Serializer):
+    """Serializer for validating a join token."""
+    token = serializers.CharField(max_length=64)
+
+    def validate(self, attrs):
+        token = attrs['token']
+        
+        try:
+            join_token = models.SessionJoinToken.objects.select_related('session', 'user').get(token=token)
+        except models.SessionJoinToken.DoesNotExist:
+            raise serializers.ValidationError({'token': 'Invalid join token.'})
+
+        if not join_token.is_valid():
+            if join_token.is_used:
+                raise serializers.ValidationError({'token': 'This join token has already been used.'})
+            if join_token.is_expired():
+                raise serializers.ValidationError({'token': 'This join token has expired.'})
+            raise serializers.ValidationError({'token': 'Invalid join token.'})
+
+        # Check if user can join
+        if not join_token.session.can_join(join_token.user):
+            raise serializers.ValidationError(
+                {'token': 'You cannot join this session yet. The other participant must be ready.'}
+            )
+
+        attrs['join_token'] = join_token
+        return attrs
+
+    def save(self, **kwargs):
+        join_token = self.validated_data['join_token']
+        
+        # Mark token as used
+        join_token.is_used = True
+        join_token.used_at = timezone.now()
+        join_token.save(update_fields=['is_used', 'used_at'])
+        
+        # Create audit log
+        models.SessionAuditLog.objects.create(
+            session=join_token.session,
+            user=join_token.user,
+            event_type=models.SessionAuditLog.EventType.JOINED,
+            message=f'{join_token.user.username} joined the session using token.',
+        )
+        
+        return join_token.session
+
+
+class SessionEndSerializer(serializers.Serializer):
+    """Serializer for ending a session."""
+    session_id = serializers.IntegerField()
+
+    def validate_session_id(self, value):
+        """Validate that the session exists."""
+        try:
+            session = models.Session.objects.select_related('initiator', 'participant').get(id=value)
+        except models.Session.DoesNotExist:
+            raise serializers.ValidationError(f'Session with ID {value} does not exist.')
+        return value
+
+    def validate(self, attrs):
+        request_user = self.context['request'].user
+        session_id = attrs['session_id']
+        
+        try:
+            session = models.Session.objects.select_related('initiator', 'participant').get(id=session_id)
+        except models.Session.DoesNotExist:
+            raise serializers.ValidationError({'session_id': f'Session with ID {session_id} does not exist.'})
+
+        # Verify user is a participant
+        if request_user not in [session.initiator, session.participant]:
+            raise serializers.ValidationError(
+                {'session_id': 'You are not a participant in this session.'}
+            )
+
+        # Check session status
+        if session.status not in [models.Session.Status.ACTIVE, models.Session.Status.PENDING]:
+            raise serializers.ValidationError(
+                {'session_id': f'Cannot end session. Current status: {session.status}.'}
+            )
+
+        attrs['session'] = session
+        return attrs
+
+    def save(self, **kwargs):
+        session = self.validated_data['session']
+        request_user = self.context['request'].user
+        
+        # Update session
+        session.status = models.Session.Status.COMPLETED
+        session.ended_at = timezone.now()
+        session.save(update_fields=['status', 'ended_at', 'updated_at'])
+        
+        # Create audit log
+        models.SessionAuditLog.objects.create(
+            session=session,
+            user=request_user,
+            event_type=models.SessionAuditLog.EventType.ENDED,
+            message=f'Session ended by {request_user.username}.',
+        )
+        
+        return session
+
+
+class SessionCancelSerializer(serializers.Serializer):
+    """Serializer for cancelling a session."""
+    session_id = serializers.IntegerField()
+
+    def validate_session_id(self, value):
+        """Validate that the session exists."""
+        try:
+            session = models.Session.objects.select_related('initiator', 'participant').get(id=value)
+        except models.Session.DoesNotExist:
+            raise serializers.ValidationError(f'Session with ID {value} does not exist.')
+        return value
+
+    def validate(self, attrs):
+        request_user = self.context['request'].user
+        session_id = attrs['session_id']
+        
+        try:
+            session = models.Session.objects.select_related('initiator', 'participant').get(id=session_id)
+        except models.Session.DoesNotExist:
+            raise serializers.ValidationError({'session_id': f'Session with ID {session_id} does not exist.'})
+
+        # Verify user is a participant
+        if request_user not in [session.initiator, session.participant]:
+            raise serializers.ValidationError(
+                {'session_id': 'You are not a participant in this session.'}
+            )
+
+        # Check session status
+        if session.status == models.Session.Status.CANCELLED:
+            raise serializers.ValidationError(
+                {'session_id': 'Session is already cancelled.'}
+            )
+        if session.status == models.Session.Status.COMPLETED:
+            raise serializers.ValidationError(
+                {'session_id': 'Cannot cancel a completed session.'}
+            )
+
+        attrs['session'] = session
+        return attrs
+
+    def save(self, **kwargs):
+        session = self.validated_data['session']
+        request_user = self.context['request'].user
+        
+        # Update session
+        session.status = models.Session.Status.CANCELLED
+        if not session.ended_at:
+            session.ended_at = timezone.now()
+        session.save(update_fields=['status', 'ended_at', 'updated_at'])
+        
+        # Create audit log
+        models.SessionAuditLog.objects.create(
+            session=session,
+            user=request_user,
+            event_type=models.SessionAuditLog.EventType.CANCELLED,
+            message=f'Session cancelled by {request_user.username}.',
+        )
+        
+        return session
+
+
+class SessionAuditLogSerializer(serializers.ModelSerializer):
+    """Serializer for session audit logs."""
+    user = SessionUserSerializer(read_only=True)
+
+    class Meta:
+        model = models.SessionAuditLog
+        fields = [
+            'id',
+            'user',
+            'event_type',
+            'message',
+            'metadata',
+            'created_at',
         ]
         read_only_fields = fields

@@ -275,7 +275,7 @@ class UserConnection(models.Model):
     class Status(models.TextChoices):
         PENDING = 'pending', 'Pending'
         APPROVED = 'approved', 'Approved'
-        BLOCKED = 'blocked', 'Blocked'
+        REJECTED = 'rejected', 'Rejected'
 
     from_user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -306,3 +306,208 @@ class UserConnection(models.Model):
 
     def __str__(self):
         return f'Connection<{self.from_user_id}->{self.to_user_id}> {self.status}'
+
+
+class Message(models.Model):
+    sender = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='messages_sent',
+    )
+    receiver = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='messages_received',
+    )
+    content = models.TextField()
+    is_read = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['sender', 'receiver', '-created_at']),
+            models.Index(fields=['receiver', 'is_read', '-created_at']),
+        ]
+
+    def __str__(self):
+        return f'Message<{self.sender_id}->{self.receiver_id}> {self.created_at}'
+
+
+class Session(models.Model):
+    class Status(models.TextChoices):
+        PENDING = 'pending', 'Pending'
+        ACTIVE = 'active', 'Active'
+        COMPLETED = 'completed', 'Completed'
+        CANCELLED = 'cancelled', 'Cancelled'
+
+    initiator = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='sessions_initiated',
+    )
+    participant = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='sessions_participated',
+    )
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    
+    # Zoom meeting details
+    zoom_meeting_id = models.CharField(max_length=255, blank=True, null=True)
+    zoom_meeting_url = models.URLField(blank=True, null=True)
+    zoom_meeting_password = models.CharField(max_length=100, blank=True, null=True)
+    
+    # Track who started the session (generated the Zoom link)
+    started_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        related_name='sessions_started',
+        null=True,
+        blank=True,
+        help_text='User who generated the Zoom link',
+    )
+    
+    # Ready status tracking
+    initiator_ready = models.BooleanField(default=False)
+    participant_ready = models.BooleanField(default=False)
+    
+    # Timestamps
+    started_at = models.DateTimeField(blank=True, null=True)
+    ended_at = models.DateTimeField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['initiator', 'status', '-created_at']),
+            models.Index(fields=['participant', 'status', '-created_at']),
+            models.Index(fields=['status', '-created_at']),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                check=~Q(initiator=F('participant')),
+                name='prevent_self_session',
+            ),
+        ]
+
+    def __str__(self):
+        return f'Session<{self.initiator_id}->{self.participant_id}> {self.status}'
+
+    def can_join(self, user):
+        """Check if a user can join the session.
+        
+        The user who generated the Zoom link cannot enter until the other
+        participant marks ready. The other participant can join once they mark ready.
+        """
+        if self.status != self.Status.ACTIVE:
+            return False
+        if user not in [self.initiator, self.participant]:
+            return False
+        
+        # If no one has started yet, no one can join
+        if not self.started_by:
+            return False
+        
+        # The user who started the session can only join if the other participant is ready
+        if user == self.started_by:
+            # Check if the other participant is ready
+            if user == self.initiator:
+                return self.participant_ready
+            else:  # user == self.participant
+                return self.initiator_ready
+        
+        # The other participant (who didn't start) can join once they mark ready
+        if user == self.initiator:
+            return self.initiator_ready
+        if user == self.participant:
+            return self.participant_ready
+        
+        return False
+
+    def mark_ready(self, user):
+        """Mark a user as ready to join."""
+        if user == self.initiator:
+            self.initiator_ready = True
+        elif user == self.participant:
+            self.participant_ready = True
+        else:
+            raise ValueError("User is not a participant in this session")
+        self.save(update_fields=['initiator_ready', 'participant_ready', 'updated_at'])
+
+
+class SessionJoinToken(models.Model):
+    """One-time tokenized join links for secure session access."""
+    session = models.ForeignKey(
+        Session,
+        on_delete=models.CASCADE,
+        related_name='join_tokens',
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='session_join_tokens',
+    )
+    token = models.CharField(max_length=64, unique=True, db_index=True)
+    is_used = models.BooleanField(default=False)
+    expires_at = models.DateTimeField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    used_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['token', 'is_used']),
+            models.Index(fields=['session', 'user', 'is_used']),
+        ]
+
+    def __str__(self):
+        return f'JoinToken<Session:{self.session_id}, User:{self.user_id}>'
+
+    def is_expired(self):
+        return timezone.now() >= self.expires_at
+
+    def is_valid(self):
+        return not self.is_used and not self.is_expired()
+
+
+class SessionAuditLog(models.Model):
+    """Audit log for all session events and state changes."""
+    class EventType(models.TextChoices):
+        CREATED = 'created', 'Session Created'
+        STARTED = 'started', 'Session Started'
+        READY = 'ready', 'Participant Ready'
+        JOINED = 'joined', 'Participant Joined'
+        LEFT = 'left', 'Participant Left'
+        ENDED = 'ended', 'Session Ended'
+        CANCELLED = 'cancelled', 'Session Cancelled'
+        ZOOM_LINK_GENERATED = 'zoom_link_generated', 'Zoom Link Generated'
+
+    session = models.ForeignKey(
+        Session,
+        on_delete=models.CASCADE,
+        related_name='audit_logs',
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        related_name='session_audit_logs',
+        null=True,
+        blank=True,
+    )
+    event_type = models.CharField(max_length=50, choices=EventType.choices)
+    message = models.TextField(blank=True)
+    metadata = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['session', '-created_at']),
+            models.Index(fields=['user', '-created_at']),
+            models.Index(fields=['event_type', '-created_at']),
+        ]
+
+    def __str__(self):
+        return f'AuditLog<Session:{self.session_id}, {self.event_type}>'

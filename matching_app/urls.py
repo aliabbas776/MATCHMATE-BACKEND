@@ -1,4 +1,4 @@
-from django.urls import path
+from django.urls import include, path
 
 from .views import (
     CNICVerificationView,
@@ -35,5 +35,8 @@ urlpatterns = [
     path('preferences/', MatchPreferenceView.as_view(), name='match-preferences'),
     path('profiles/', ProfileListView.as_view(), name='profile-list'),
     path('profiles/search/', ProfileSearchView.as_view(), name='profile-search'),
+    path('v1/connections/', include('matching_app.urls_connections')),
+    path('v1/messages/', include('matching_app.urls_messages')),
+    path('v1/sessions/', include('matching_app.urls_sessions')),
 ]
 
