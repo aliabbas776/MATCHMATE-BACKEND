@@ -176,6 +176,138 @@ class UserProfile(models.Model):
         required_fields = ['candidate_name', 'gender', 'city', 'caste', 'religion']
         return all(bool(getattr(self, field)) for field in required_fields)
 
+    def get_completion_percentage(self) -> dict:
+        """
+        Calculate profile completion percentage based on filled fields.
+        Returns a dictionary with percentage and breakdown by section.
+        """
+        # Define fields with their weights (importance)
+        # Total weight = 100
+        field_weights = {
+            # Candidate Information (30%)
+            'candidate_name': 5,
+            'date_of_birth': 5,
+            'country': 3,
+            'city': 3,
+            'religion': 3,
+            'sect': 2,
+            'caste': 3,
+            'height_cm': 2,
+            'weight_kg': 2,
+            'phone_number': 2,
+            
+            # Profile Details (15%)
+            'profile_for': 3,
+            'gender': 5,
+            'marital_status': 7,
+            
+            # Family Details (15%)
+            'father_status': 4,
+            'father_employment_status': 3,
+            'mother_status': 4,
+            'mother_employment_status': 3,
+            'total_brothers': 0.5,
+            'total_sisters': 0.5,
+            
+            # Education & Employment (20%)
+            'education_level': 7,
+            'employment_status': 7,
+            'profession': 6,
+            
+            # Media (10%)
+            'profile_picture': 10,
+            
+            # Additional Info (10%)
+            'has_disability': 5,
+            'cnic_verification_status': 5,  # Bonus if verified
+        }
+        
+        completed_weight = 0
+        total_weight = sum(field_weights.values())
+        section_breakdown = {
+            'candidate_information': {'completed': 0, 'total': 0},
+            'profile_details': {'completed': 0, 'total': 0},
+            'family_details': {'completed': 0, 'total': 0},
+            'education_employment': {'completed': 0, 'total': 0},
+            'media': {'completed': 0, 'total': 0},
+            'additional_info': {'completed': 0, 'total': 0},
+        }
+        
+        # Section mapping
+        section_map = {
+            'candidate_name': 'candidate_information',
+            'date_of_birth': 'candidate_information',
+            'country': 'candidate_information',
+            'city': 'candidate_information',
+            'religion': 'candidate_information',
+            'sect': 'candidate_information',
+            'caste': 'candidate_information',
+            'height_cm': 'candidate_information',
+            'weight_kg': 'candidate_information',
+            'phone_number': 'candidate_information',
+            'profile_for': 'profile_details',
+            'gender': 'profile_details',
+            'marital_status': 'profile_details',
+            'father_status': 'family_details',
+            'father_employment_status': 'family_details',
+            'mother_status': 'family_details',
+            'mother_employment_status': 'family_details',
+            'total_brothers': 'family_details',
+            'total_sisters': 'family_details',
+            'education_level': 'education_employment',
+            'employment_status': 'education_employment',
+            'profession': 'education_employment',
+            'profile_picture': 'media',
+            'has_disability': 'additional_info',
+            'cnic_verification_status': 'additional_info',
+        }
+        
+        # Check each field
+        for field, weight in field_weights.items():
+            section = section_map.get(field, 'additional_info')
+            section_breakdown[section]['total'] += weight
+            
+            value = getattr(self, field, None)
+            is_filled = False
+            
+            if field == 'cnic_verification_status':
+                # Special case: only count if verified
+                is_filled = value == 'verified'
+            elif field == 'total_brothers' or field == 'total_sisters':
+                # These are integers, 0 is a valid value
+                is_filled = value is not None
+            elif field == 'has_disability':
+                # Boolean field, always has a value
+                is_filled = True
+            elif isinstance(value, bool):
+                # Boolean fields are always filled
+                is_filled = True
+            else:
+                # Check if field has a non-empty value
+                is_filled = bool(value) and str(value).strip() != ''
+            
+            if is_filled:
+                completed_weight += weight
+                section_breakdown[section]['completed'] += weight
+        
+        percentage = round((completed_weight / total_weight) * 100, 2)
+        
+        # Calculate section percentages
+        section_percentages = {}
+        for section, data in section_breakdown.items():
+            if data['total'] > 0:
+                section_percentages[section] = round((data['completed'] / data['total']) * 100, 2)
+            else:
+                section_percentages[section] = 0.0
+        
+        return {
+            'completion_percentage': percentage,
+            'completed_fields': completed_weight,
+            'total_fields': total_weight,
+            'sections': section_percentages,
+            'is_completed': self.is_completed,
+        }
+
     def __str__(self):
         return f"{self.user.username}'s profile"
 

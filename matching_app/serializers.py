@@ -296,6 +296,7 @@ class UserProfileSectionSerializer(serializers.ModelSerializer):
                 'candidate_information',
                 [
                     'candidate_name',
+                    'email',
                     'hidden_name',
                     'date_of_birth',
                     'country',
@@ -355,11 +356,13 @@ class UserProfileSectionSerializer(serializers.ModelSerializer):
     profile_picture = serializers.ImageField(required=False, allow_null=True)
     has_disability = serializers.BooleanField(required=False)
     generated_description = serializers.CharField(read_only=True)
+    email = serializers.EmailField(required=False, write_only=False)
 
     class Meta:
         model = UserProfile
         fields = [
             'candidate_name',
+            'email',
             'hidden_name',
             'date_of_birth',
             'country',
@@ -462,6 +465,9 @@ class UserProfileSectionSerializer(serializers.ModelSerializer):
 
     def to_representation(self, instance):
         rep = super().to_representation(instance)
+        # Add email from user model
+        if hasattr(instance, 'user') and instance.user:
+            rep['email'] = instance.user.email
         request = self.context.get('request')
         helper = get_photo_visibility_helper(self.context)
         rep['profile_picture'] = resolve_profile_picture_url(instance, request, helper)
@@ -497,6 +503,22 @@ class UserProfileSectionSerializer(serializers.ModelSerializer):
                 'verified_at': verified_at,
             }
         return sectioned
+
+    def save(self, **kwargs):
+        # Handle email update if provided
+        email = self.validated_data.pop('email', None)
+        instance = super().save(**kwargs)
+        
+        # Update user email if provided
+        if email is not None and hasattr(instance, 'user'):
+            # Validate email uniqueness (excluding current user)
+            User = get_user_model()
+            if User.objects.filter(email__iexact=email).exclude(id=instance.user.id).exists():
+                raise serializers.ValidationError({'email': 'A user with this email already exists.'})
+            instance.user.email = email
+            instance.user.save(update_fields=['email'])
+        
+        return instance
 
 
 class UserAccountSerializer(serializers.ModelSerializer):

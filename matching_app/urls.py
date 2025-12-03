@@ -6,6 +6,7 @@ from .views import (
     MatchPreferenceView,
     PasswordResetConfirmView,
     PasswordResetRequestView,
+    ProfileCompletionView,
     ProfileDescriptionView,
     ProfileListView,
     ProfilePhotoUploadView,
@@ -25,6 +26,7 @@ urlpatterns = [
     path('account/', UserAccountView.as_view(), name='account'),
     path('account/delete/', UserAccountDeleteView.as_view(), name='account-delete'),
     path('profile/', UserProfileView.as_view(), name='profile'),
+    path('profile/completion/', ProfileCompletionView.as_view(), name='profile-completion'),
     path(
         'profile/description/',
         ProfileDescriptionView.as_view(),

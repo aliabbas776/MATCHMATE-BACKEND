@@ -61,6 +61,60 @@ def get_or_create_match_preference(user):
     return preference
 
 
+def _get_matching_profiles(user, preference):
+    """
+    Get profiles that match the user's preferences with opposite gender.
+    """
+    viewer_profile = get_or_create_user_profile(user)
+    
+    # Determine opposite gender
+    opposite_gender_map = {
+        'male': 'female',
+        'female': 'male',
+    }
+    target_gender = opposite_gender_map.get(viewer_profile.gender.lower() if viewer_profile.gender else None)
+    
+    if not target_gender:
+        return UserProfile.objects.none()
+    
+    queryset = UserProfile.objects.exclude(user=user).filter(gender=target_gender).select_related('user')
+    
+    # Apply preference filters
+    field_map = {
+        'status': 'marital_status',
+        'religion': 'religion',
+        'caste': 'caste',
+        'country': 'country',
+        'city': 'city',
+        'employment_status': 'employment_status',
+        'profession': 'profession',
+    }
+    
+    for param, model_field in field_map.items():
+        value = getattr(preference, param, None)
+        if value:
+            queryset = queryset.filter(**{model_field: value})
+    
+    # Disability filter
+    if preference.prefers_disability is True:
+        queryset = queryset.filter(has_disability=True)
+    elif preference.prefers_disability is False:
+        queryset = queryset.filter(has_disability=False)
+    
+    # Age filter
+    today = timezone.now().date()
+    if preference.min_age is not None or preference.max_age is not None:
+        queryset = queryset.filter(date_of_birth__isnull=False)
+    if preference.max_age is not None:
+        min_birth_date = _subtract_years(today, preference.max_age)
+        queryset = queryset.filter(date_of_birth__gte=min_birth_date)
+    if preference.min_age is not None:
+        max_birth_date = _subtract_years(today, preference.min_age)
+        queryset = queryset.filter(date_of_birth__lte=max_birth_date)
+    
+    return queryset.order_by('-updated_at')
+
+
 def _subtract_years(reference_date: date, years: int) -> date:
     try:
         return reference_date.replace(year=reference_date.year - years)
@@ -219,6 +273,21 @@ class UserProfileView(APIView):
                 {'detail': 'Profile not found.'},
                 status=status.HTTP_404_NOT_FOUND,
             )
+
+
+class ProfileCompletionView(APIView):
+    """
+    Authenticated endpoint that returns profile completion percentage.
+    """
+
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        """Get profile completion percentage."""
+        profile = get_or_create_user_profile(request.user)
+        completion_data = profile.get_completion_percentage()
+        return Response(completion_data, status=status.HTTP_200_OK)
 
 
 class ProfileDescriptionView(APIView):
@@ -393,6 +462,7 @@ class CNICVerificationView(APIView):
 class MatchPreferenceView(APIView):
     """
     Manage the logged-in user's saved search preferences.
+    Returns matching profiles with opposite gender after saving preferences.
     """
 
     authentication_classes = [JWTAuthentication]
@@ -401,21 +471,66 @@ class MatchPreferenceView(APIView):
     def get(self, request):
         preference = get_or_create_match_preference(request.user)
         serializer = MatchPreferenceSerializer(preference)
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        
+        # Get matching profiles
+        matching_profiles = _get_matching_profiles(request.user, preference)
+        profile_serializer = UserProfileListSerializer(
+            matching_profiles,
+            many=True,
+            context={'request': request},
+        )
+        
+        return Response({
+            'preferences': serializer.data,
+            'matching_profiles': profile_serializer.data,
+            'total_matches': matching_profiles.count(),
+        }, status=status.HTTP_200_OK)
 
     def put(self, request):
         preference = get_or_create_match_preference(request.user)
         serializer = MatchPreferenceSerializer(preference, data=request.data)
         serializer.is_valid(raise_exception=True)
         serializer.save()
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        
+        # Refresh preference from DB to get updated values
+        preference.refresh_from_db()
+        
+        # Get matching profiles
+        matching_profiles = _get_matching_profiles(request.user, preference)
+        profile_serializer = UserProfileListSerializer(
+            matching_profiles,
+            many=True,
+            context={'request': request},
+        )
+        
+        return Response({
+            'preferences': serializer.data,
+            'matching_profiles': profile_serializer.data,
+            'total_matches': matching_profiles.count(),
+        }, status=status.HTTP_200_OK)
 
     def patch(self, request):
         preference = get_or_create_match_preference(request.user)
         serializer = MatchPreferenceSerializer(preference, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         serializer.save()
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        
+        # Refresh preference from DB to get updated values
+        preference.refresh_from_db()
+        
+        # Get matching profiles
+        matching_profiles = _get_matching_profiles(request.user, preference)
+        profile_serializer = UserProfileListSerializer(
+            matching_profiles,
+            many=True,
+            context={'request': request},
+        )
+        
+        return Response({
+            'preferences': serializer.data,
+            'matching_profiles': profile_serializer.data,
+            'total_matches': matching_profiles.count(),
+        }, status=status.HTTP_200_OK)
 
 
 class UserAccountView(APIView):
