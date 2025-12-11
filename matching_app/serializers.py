@@ -640,10 +640,53 @@ class CNICVerificationSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+class ConnectionUserProfileSerializer(serializers.ModelSerializer):
+    """Complete profile info for connection responses."""
+
+    profile_picture = serializers.SerializerMethodField()
+
+    class Meta:
+        model = UserProfile
+        fields = [
+            'id',
+            'candidate_name',
+            'date_of_birth',
+            'gender',
+            'marital_status',
+            'profile_for',
+            'country',
+            'city',
+            'religion',
+            'sect',
+            'caste',
+            'height_cm',
+            'weight_kg',
+            'education_level',
+            'employment_status',
+            'profession',
+            'father_status',
+            'mother_status',
+            'total_brothers',
+            'total_sisters',
+            'has_disability',
+            'profile_picture',
+            'generated_description',
+            'is_public',
+            'blur_photo',
+        ]
+
+    def get_profile_picture(self, instance):
+        request = self.context.get('request')
+        helper = get_photo_visibility_helper(self.context)
+        return resolve_profile_picture_url(instance, request, helper)
+
+
 class ConnectionUserSummarySerializer(serializers.ModelSerializer):
+    profile = ConnectionUserProfileSerializer(read_only=True)
+
     class Meta:
         model = User
-        fields = ['id', 'username', 'first_name', 'last_name']
+        fields = ['id', 'username', 'first_name', 'last_name', 'profile']
 
 
 class UserConnectionSerializer(serializers.ModelSerializer):

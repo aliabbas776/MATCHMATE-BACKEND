@@ -96,7 +96,12 @@ class ConnectionRemoveView(ConnectionBaseView):
 class FriendsListView(ConnectionBaseView):
     def get(self, request):
         connections = (
-            UserConnection.objects.select_related('from_user', 'to_user')
+            UserConnection.objects.select_related(
+                'from_user',
+                'from_user__profile',
+                'to_user',
+                'to_user__profile',
+            )
             .filter(
                 Q(status=UserConnection.Status.APPROVED),
                 Q(from_user=request.user) | Q(to_user=request.user),
@@ -110,7 +115,12 @@ class FriendsListView(ConnectionBaseView):
 class PendingSentListView(ConnectionBaseView):
     def get(self, request):
         connections = (
-            UserConnection.objects.select_related('from_user', 'to_user')
+            UserConnection.objects.select_related(
+                'from_user',
+                'from_user__profile',
+                'to_user',
+                'to_user__profile',
+            )
             .filter(from_user=request.user, status=UserConnection.Status.PENDING)
             .order_by('-created_at')
         )
@@ -121,7 +131,12 @@ class PendingSentListView(ConnectionBaseView):
 class PendingReceivedListView(ConnectionBaseView):
     def get(self, request):
         connections = (
-            UserConnection.objects.select_related('from_user', 'to_user')
+            UserConnection.objects.select_related(
+                'from_user',
+                'from_user__profile',
+                'to_user',
+                'to_user__profile',
+            )
             .filter(to_user=request.user, status=UserConnection.Status.PENDING)
             .order_by('-created_at')
         )
