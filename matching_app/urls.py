@@ -2,6 +2,7 @@ from django.urls import include, path
 
 from .views import (
     CNICVerificationView,
+    DashboardProfileCompletionView,
     LoginView,
     MatchPreferenceView,
     PasswordResetConfirmView,
@@ -12,9 +13,14 @@ from .views import (
     ProfilePhotoUploadView,
     ProfileSearchView,
     RegistrationView,
+    SubscriptionCancelView,
+    SubscriptionPlanListView,
     UserAccountDeleteView,
     UserAccountView,
+    UserProfileDetailView,
     UserProfileView,
+    UserReportView,
+    UserSubscriptionView,
 )
 
 
@@ -26,7 +32,9 @@ urlpatterns = [
     path('account/', UserAccountView.as_view(), name='account'),
     path('account/delete/', UserAccountDeleteView.as_view(), name='account-delete'),
     path('profile/', UserProfileView.as_view(), name='profile'),
+    path('profile/<int:user_id>/', UserProfileDetailView.as_view(), name='profile-detail'),
     path('profile/completion/', ProfileCompletionView.as_view(), name='profile-completion'),
+    path('dashboard/profile-completion/', DashboardProfileCompletionView.as_view(), name='dashboard-profile-completion'),
     path(
         'profile/description/',
         ProfileDescriptionView.as_view(),
@@ -37,6 +45,10 @@ urlpatterns = [
     path('preferences/', MatchPreferenceView.as_view(), name='match-preferences'),
     path('profiles/', ProfileListView.as_view(), name='profile-list'),
     path('profiles/search/', ProfileSearchView.as_view(), name='profile-search'),
+    path('reports/', UserReportView.as_view(), name='user-report'),
+    path('subscriptions/plans/', SubscriptionPlanListView.as_view(), name='subscription-plans'),
+    path('subscriptions/', UserSubscriptionView.as_view(), name='user-subscription'),
+    path('subscriptions/cancel/', SubscriptionCancelView.as_view(), name='subscription-cancel'),
     path('v1/connections/', include('matching_app.urls_connections')),
     path('v1/messages/', include('matching_app.urls_messages')),
     path('v1/sessions/', include('matching_app.urls_sessions')),

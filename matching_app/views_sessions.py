@@ -1,4 +1,5 @@
-from django.db.models import Q
+from django.db.models import Q, F
+from django.db import transaction
 from rest_framework import status
 from rest_framework.parsers import JSONParser, FormParser
 from rest_framework.permissions import IsAuthenticated
@@ -6,7 +7,23 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
-from .models import Message, Session, UserConnection
+from .models import Message, Session, SubscriptionPlan, UserConnection, UserSubscription
+
+
+def get_or_create_user_subscription(user):
+    """Get or create user subscription, defaulting to FREE plan if doesn't exist."""
+    try:
+        subscription = UserSubscription.objects.select_related('plan').get(user=user)
+        return subscription
+    except UserSubscription.DoesNotExist:
+        # Get FREE plan
+        free_plan = SubscriptionPlan.objects.get(tier=SubscriptionPlan.PlanTier.FREE)
+        subscription = UserSubscription.objects.create(
+            user=user,
+            plan=free_plan,
+            status=UserSubscription.SubscriptionStatus.ACTIVE,
+        )
+        return subscription
 from .serializers import (
     SessionAuditLogSerializer,
     SessionCancelSerializer,
@@ -58,7 +75,54 @@ class CreateSessionView(SessionBaseView):
             context={'request': request},
         )
         serializer.is_valid(raise_exception=True)
-        session = serializer.save()
+        
+        # Use atomic transaction to check limits and create session in one operation
+        with transaction.atomic():
+            # Lock and reload subscription with plan relationship to get latest values
+            # Use select_for_update to lock the row and prevent concurrent modifications
+            subscription = UserSubscription.objects.select_related('plan').select_for_update().get(
+                user=request.user
+            )
+            
+            # Check if subscription is active
+            if not subscription.is_active:
+                return Response(
+                    {
+                        'error': 'Subscription Expired',
+                        'detail': 'Your subscription has expired. Please renew to continue using this feature.',
+                        'upgrade_required': True,
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            
+            # Check session creation limit (must check BEFORE creating session)
+            # Use explicit comparison to ensure we're checking correctly
+            max_sessions = subscription.plan.max_sessions
+            sessions_used = subscription.sessions_used
+            
+            # CRITICAL: Block if user has reached or exceeded the limit
+            if max_sessions != -1:  # Not unlimited
+                if sessions_used >= max_sessions:
+                    return Response(
+                        {
+                            'error': 'Session Limit Exceeded',
+                            'detail': f'You have reached your monthly limit of {max_sessions} call sessions. You have used {sessions_used} sessions.',
+                            'limit': max_sessions,
+                            'used': sessions_used,
+                            'upgrade_required': True,
+                            'message': 'Please upgrade your subscription plan to create more call sessions.',
+                        },
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
+            
+            # Pass the locked subscription to serializer to ensure it uses the same object
+            # This prevents any race conditions
+            serializer.context['subscription'] = subscription
+            
+            # Only create session if limit check passes
+            # Create session (counter will be incremented in serializer)
+            session = serializer.save()
+        
         response_data = SessionSerializer(session, context={'request': request}).data
         return Response(response_data, status=status.HTTP_201_CREATED)
 

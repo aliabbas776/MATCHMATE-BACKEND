@@ -1,11 +1,28 @@
-from django.db.models import Q, Max
+from django.db.models import Q, Max, F
+from django.db import transaction
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
-from .models import Message, UserConnection
+from .models import Message, SubscriptionPlan, UserConnection, UserSubscription
+
+
+def get_or_create_user_subscription(user):
+    """Get or create user subscription, defaulting to FREE plan if doesn't exist."""
+    try:
+        subscription = UserSubscription.objects.select_related('plan').get(user=user)
+        return subscription
+    except UserSubscription.DoesNotExist:
+        # Get FREE plan
+        free_plan = SubscriptionPlan.objects.get(tier=SubscriptionPlan.PlanTier.FREE)
+        subscription = UserSubscription.objects.create(
+            user=user,
+            plan=free_plan,
+            status=UserSubscription.SubscriptionStatus.ACTIVE,
+        )
+        return subscription
 from .serializers import (
     ConversationListSerializer,
     MessageCreateSerializer,
@@ -27,7 +44,92 @@ class SendMessageView(MessageBaseView):
             context={'request': request},
         )
         serializer.is_valid(raise_exception=True)
-        message = serializer.save()
+        
+        # Get receiver from validated data
+        receiver = serializer.validated_data.get('receiver')
+        
+        # Use atomic transaction to check limits and create message in one operation
+        with transaction.atomic():
+            # Lock and reload subscription with plan relationship to get latest values
+            subscription = UserSubscription.objects.select_related('plan').select_for_update().get(
+                user=request.user
+            )
+            
+            # Check if subscription is active
+            if not subscription.is_active:
+                return Response(
+                    {
+                        'error': 'Subscription Expired',
+                        'detail': 'Your subscription has expired. Please renew to continue using this feature.',
+                        'upgrade_required': True,
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            
+            # Check if user can chat with this receiver (must check BEFORE creating message)
+            # First check if limit applies (not unlimited)
+            max_chat_users_limit = subscription.plan.max_chat_users
+            
+            # ENFORCE CHAT LIMIT: If limit is set (not -1), check if user can start new chat
+            if max_chat_users_limit != -1:
+                # Check if user has already chatted with this receiver before
+                has_chatted_before = Message.objects.filter(
+                    Q(sender=request.user, receiver=receiver) |
+                    Q(sender=receiver, receiver=request.user)
+                ).exists()
+                
+                # If they haven't chatted with this user before, we need to check the limit
+                # because this would be a NEW chat
+                if not has_chatted_before:
+                    # Count distinct users user has chatted with (EXCLUDING current receiver)
+                    sent_to_users = set(
+                        Message.objects.filter(sender=request.user)
+                        .values_list('receiver_id', flat=True)
+                        .distinct()
+                    )
+                    received_from_users = set(
+                        Message.objects.filter(receiver=request.user)
+                        .values_list('sender_id', flat=True)
+                        .distinct()
+                    )
+                    # Get all users they've chatted with (combining sent and received)
+                    distinct_chat_users = len(sent_to_users | received_from_users)
+                    
+                    # If they've already reached the limit, block this new chat
+                    # Example: limit=1, they've chatted with 1 user, distinct_chat_users=1
+                    # 1 >= 1 → True → BLOCK
+                    if distinct_chat_users >= max_chat_users_limit:
+                        return Response(
+                            {
+                                'error': 'Chat Limit Exceeded',
+                                'detail': f'You have reached your monthly limit of {max_chat_users_limit} different users you can chat with. You are currently chatting with {distinct_chat_users} user(s).',
+                                'limit': max_chat_users_limit,
+                                'used': distinct_chat_users,
+                                'upgrade_required': True,
+                                'message': 'Please upgrade your subscription plan to chat with more users.',
+                            },
+                            status=status.HTTP_403_FORBIDDEN,
+                        )
+                # If has_chatted_before is True, they've already chatted with this user,
+                # so we allow them to continue (no limit check needed for existing chats)
+            
+            # Check if this user has chatted with this receiver before
+            # This is to determine if we should increment chat_users_count
+            has_user_chatted_before = Message.objects.filter(
+                Q(sender=request.user, receiver=receiver) |
+                Q(sender=receiver, receiver=request.user)
+            ).exists()
+            
+            # Only create message if limit check passes
+            message = serializer.save()
+            
+            # Increment chat_users_count if this is the first time this user is chatting with receiver
+            # (i.e., no previous messages exist between these two users)
+            if not has_user_chatted_before:
+                UserSubscription.objects.filter(user=request.user).update(
+                    chat_users_count=F('chat_users_count') + 1
+                )
+        
         response_data = MessageSerializer(message, context={'request': request}).data
         return Response(response_data, status=status.HTTP_201_CREATED)
 
@@ -132,6 +234,18 @@ class ConversationsListView(MessageBaseView):
             many=True,
             context={'request': request}
         )
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class AllMessagesView(MessageBaseView):
+    """Endpoint for getting all messages for the authenticated user."""
+    def get(self, request):
+        # Get all messages where the user is either sender or receiver
+        messages = Message.objects.filter(
+            Q(sender=request.user) | Q(receiver=request.user)
+        ).select_related('sender', 'receiver').order_by('-created_at')
+
+        serializer = MessageSerializer(messages, many=True, context={'request': request})
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 

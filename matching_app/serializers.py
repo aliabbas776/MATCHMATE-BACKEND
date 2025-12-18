@@ -21,8 +21,11 @@ from .models import (
     MatchPreference,
     Message,
     PasswordResetOTP,
+    SubscriptionPlan,
     UserConnection,
     UserProfile,
+    UserReport,
+    UserSubscription,
 )
 from .photo_visibility import get_photo_visibility_helper, resolve_profile_picture_url
 
@@ -1028,45 +1031,27 @@ class SessionUserSerializer(serializers.ModelSerializer):
 
 class SessionSerializer(serializers.ModelSerializer):
     """Serializer for viewing session details."""
+    initiator_id = serializers.IntegerField(source='initiator.id', read_only=True)
+    participant_id = serializers.IntegerField(source='participant.id', read_only=True)
     initiator = SessionUserSerializer(read_only=True)
     participant = SessionUserSerializer(read_only=True)
-    started_by = SessionUserSerializer(read_only=True)
-    can_join = serializers.SerializerMethodField()
-    is_initiator = serializers.SerializerMethodField()
 
     class Meta:
         model = models.Session
         fields = [
             'id',
+            'initiator_id',
             'initiator',
+            'participant_id',
             'participant',
             'status',
-            'started_by',
             'zoom_meeting_id',
             'zoom_meeting_url',
             'zoom_meeting_password',
-            'initiator_ready',
-            'participant_ready',
-            'can_join',
-            'is_initiator',
-            'started_at',
-            'ended_at',
             'created_at',
             'updated_at',
         ]
         read_only_fields = fields
-
-    def get_can_join(self, obj):
-        request = self.context.get('request')
-        if request and request.user.is_authenticated:
-            return obj.can_join(request.user)
-        return False
-
-    def get_is_initiator(self, obj):
-        request = self.context.get('request')
-        if request and request.user.is_authenticated:
-            return obj.initiator_id == request.user.id
-        return False
 
 
 class SessionCreateSerializer(serializers.Serializer):
@@ -1112,11 +1097,52 @@ class SessionCreateSerializer(serializers.Serializer):
         initiator = validated_data['initiator']
         participant = validated_data['participant']
         
+        # Get subscription from context (passed from view with lock) or reload it
+        # This ensures we use the same locked subscription object
+        from django.db.models import F
+        
+        subscription = self.context.get('subscription')
+        if not subscription:
+            # Fallback: reload subscription (should not happen if view is correct)
+            subscription = models.UserSubscription.objects.select_related('plan').get(user=initiator)
+        
+        # CRITICAL: Double-check subscription limit before creating session
+        # This is a safety check to prevent any bypass
+        max_sessions = subscription.plan.max_sessions
+        sessions_used = subscription.sessions_used
+        
+        if max_sessions != -1:  # Not unlimited
+            if sessions_used >= max_sessions:
+                raise serializers.ValidationError(
+                    {
+                        'participant_id': f'Session limit exceeded. You have used {sessions_used} of {max_sessions} allowed sessions. Please upgrade your plan to create more sessions.'
+                    }
+                )
+        
+        # Only create session if limit check passes
         session = models.Session.objects.create(
             initiator=initiator,
             participant=participant,
             status=models.Session.Status.PENDING,
         )
+        
+        # Increment counter atomically (using F() expression for database-level increment)
+        # Use the subscription ID to ensure we're updating the correct row
+        updated_count = models.UserSubscription.objects.filter(
+            id=subscription.id,
+            user=initiator
+        ).update(
+            sessions_used=F('sessions_used') + 1
+        )
+        
+        # Verify the update succeeded
+        if updated_count != 1:
+            # This should never happen, but if it does, we have a problem
+            raise serializers.ValidationError(
+                {
+                    'participant_id': 'Failed to update session counter. Please try again.'
+                }
+            )
         
         # Create audit log
         models.SessionAuditLog.objects.create(
@@ -1509,3 +1535,170 @@ class SessionAuditLogSerializer(serializers.ModelSerializer):
             'created_at',
         ]
         read_only_fields = fields
+
+
+class SubscriptionPlanSerializer(serializers.ModelSerializer):
+    """Serializer for subscription plans."""
+    
+    class Meta:
+        model = SubscriptionPlan
+        fields = [
+            'id',
+            'tier',
+            'name',
+            'description',
+            'price',
+            'duration_days',
+            'max_profile_views',
+            'max_connections',
+            'max_connection_requests',
+            'max_chat_users',
+            'max_sessions',
+            'can_send_messages',
+            'can_view_photos',
+            'can_see_who_viewed',
+            'priority_support',
+            'advanced_search',
+            'verified_badge',
+            'is_active',
+            'created_at',
+        ]
+        read_only_fields = ['id', 'created_at']
+
+
+class UserSubscriptionSerializer(serializers.ModelSerializer):
+    """Serializer for user subscriptions."""
+    plan = SubscriptionPlanSerializer(read_only=True)
+    plan_id = serializers.IntegerField(write_only=True, required=False)
+    days_remaining = serializers.SerializerMethodField()
+    is_active_display = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = UserSubscription
+        fields = [
+            'id',
+            'user',
+            'plan',
+            'plan_id',
+            'status',
+            'started_at',
+            'expires_at',
+            'auto_renew',
+            'cancelled_at',
+            'cancellation_reason',
+            'profile_views_used',
+            'connections_used',
+            'connection_requests_used',
+            'chat_users_count',
+            'sessions_used',
+            'last_reset_at',
+            'days_remaining',
+            'is_active_display',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = [
+            'id',
+            'user',
+            'plan',
+            'status',
+            'started_at',
+            'expires_at',
+            'cancelled_at',
+            'profile_views_used',
+            'connections_used',
+            'connection_requests_used',
+            'chat_users_count',
+            'sessions_used',
+            'last_reset_at',
+            'created_at',
+            'updated_at',
+        ]
+    
+    def get_days_remaining(self, obj):
+        """Get days remaining in subscription."""
+        return obj.days_remaining
+    
+    def get_is_active_display(self, obj):
+        """Get if subscription is active."""
+        return obj.is_active
+
+
+class SubscriptionUpgradeSerializer(serializers.Serializer):
+    """Serializer for subscribing/upgrading to a plan."""
+    plan_id = serializers.IntegerField(required=True)
+    auto_renew = serializers.BooleanField(default=False, required=False)
+    
+    def validate_plan_id(self, value):
+        """Validate that the plan exists and is active."""
+        try:
+            plan = SubscriptionPlan.objects.get(id=value, is_active=True)
+        except SubscriptionPlan.DoesNotExist:
+            raise serializers.ValidationError('Subscription plan not found or inactive.')
+        return value
+
+
+class UserReportSerializer(serializers.Serializer):
+    """Serializer for creating user reports."""
+    reported_user_id = serializers.IntegerField(required=True)
+    reason = serializers.ChoiceField(
+        choices=UserReport.ReportReason.choices,
+        required=True,
+    )
+    description = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=1000,
+    )
+
+    def validate_reported_user_id(self, value):
+        """Validate that the reported user exists."""
+        try:
+            reported_user = User.objects.get(id=value, is_active=True)
+        except User.DoesNotExist:
+            raise serializers.ValidationError('User not found or inactive.')
+        return value
+
+    def validate(self, attrs):
+        request_user = self.context['request'].user
+        reported_user_id = attrs.get('reported_user_id')
+        
+        if not reported_user_id:
+            raise serializers.ValidationError({'reported_user_id': 'This field is required.'})
+        
+        try:
+            reported_user = User.objects.get(id=reported_user_id, is_active=True)
+        except User.DoesNotExist:
+            raise serializers.ValidationError({'reported_user_id': 'User not found or inactive.'})
+        
+        if request_user.id == reported_user_id:
+            raise serializers.ValidationError({'reported_user_id': 'You cannot report yourself.'})
+        
+        # Check if user has already reported this user
+        existing_report = UserReport.objects.filter(
+            reporter=request_user,
+            reported_user=reported_user,
+            status='pending'
+        ).exists()
+        
+        if existing_report:
+            raise serializers.ValidationError(
+                {'reported_user_id': 'You have already reported this user. Please wait for admin review.'}
+            )
+        
+        attrs['reported_user'] = reported_user
+        return attrs
+
+    def create(self, validated_data):
+        request_user = self.context['request'].user
+        reported_user = validated_data['reported_user']
+        reason = validated_data['reason']
+        description = validated_data.get('description', '')
+        
+        return UserReport.objects.create(
+            reporter=request_user,
+            reported_user=reported_user,
+            reason=reason,
+            description=description,
+            status='pending',
+        )

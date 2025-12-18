@@ -165,6 +165,15 @@ class UserProfile(models.Model):
         default='unverified',
     )
     cnic_verified_at = models.DateTimeField(blank=True, null=True)
+    
+    # Profile status
+    is_disabled = models.BooleanField(
+        default=False,
+        help_text='Profile is disabled due to multiple reports. Requires admin approval to re-enable.'
+    )
+    disabled_at = models.DateTimeField(blank=True, null=True)
+    disabled_reason = models.TextField(blank=True, help_text='Reason for profile being disabled')
+    
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -643,3 +652,365 @@ class SessionAuditLog(models.Model):
 
     def __str__(self):
         return f'AuditLog<Session:{self.session_id}, {self.event_type}>'
+
+
+class UserReport(models.Model):
+    """
+    Model to track reports made by users against other users.
+    """
+    class ReportReason(models.TextChoices):
+        INAPPROPRIATE_CONTENT = 'inappropriate_content', 'Inappropriate Content'
+        FAKE_PROFILE = 'fake_profile', 'Fake Profile'
+        HARASSMENT = 'harassment', 'Harassment'
+        SPAM = 'spam', 'Spam'
+        SCAM = 'scam', 'Scam'
+        OTHER = 'other', 'Other'
+
+    reporter = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='reports_made',
+        help_text='User who made the report',
+    )
+    reported_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='reports_received',
+        help_text='User who is being reported',
+    )
+    reason = models.CharField(
+        max_length=50,
+        choices=ReportReason.choices,
+        default=ReportReason.OTHER,
+    )
+    description = models.TextField(
+        blank=True,
+        help_text='Additional details about the report',
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=[
+            ('pending', 'Pending Review'),
+            ('reviewed', 'Reviewed'),
+            ('dismissed', 'Dismissed'),
+        ],
+        default='pending',
+    )
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='reports_reviewed',
+        help_text='Admin who reviewed this report',
+    )
+    reviewed_at = models.DateTimeField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['reported_user', 'status', '-created_at']),
+            models.Index(fields=['reporter', '-created_at']),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                check=~Q(reporter=F('reported_user')),
+                name='prevent_self_report',
+            ),
+        ]
+
+    def __str__(self):
+        return f'Report<{self.reporter_id}->{self.reported_user_id}> {self.reason}'
+
+
+class SubscriptionPlan(models.Model):
+    """
+    Model to define subscription plan tiers.
+    """
+    class PlanTier(models.TextChoices):
+        FREE = 'free', 'Free'
+        SILVER = 'silver', 'Silver'
+        GOLD = 'gold', 'Gold'
+        PLATINUM = 'platinum', 'Platinum'
+
+    tier = models.CharField(
+        max_length=20,
+        choices=PlanTier.choices,
+        unique=True,
+        help_text='Subscription tier level',
+    )
+    name = models.CharField(
+        max_length=100,
+        help_text='Display name for the subscription plan',
+    )
+    description = models.TextField(
+        blank=True,
+        help_text='Description of what this plan includes',
+    )
+    price = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0.00,
+        help_text='Monthly price (0.00 for free tier)',
+    )
+    duration_days = models.IntegerField(
+        default=30,
+        help_text='Duration of subscription in days',
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text='Whether this plan is currently available for subscription',
+    )
+    
+    # Features/benefits for each tier
+    max_profile_views = models.IntegerField(
+        default=-1,
+        help_text='Maximum profile views per month (-1 for unlimited)',
+    )
+    max_connections = models.IntegerField(
+        default=-1,
+        help_text='Maximum connections per month (-1 for unlimited)',
+    )
+    max_connection_requests = models.IntegerField(
+        default=-1,
+        help_text='Maximum connection requests per month (-1 for unlimited)',
+    )
+    max_chat_users = models.IntegerField(
+        default=-1,
+        help_text='Maximum number of different users you can chat with (-1 for unlimited)',
+    )
+    max_sessions = models.IntegerField(
+        default=-1,
+        help_text='Maximum number of call sessions per month (-1 for unlimited)',
+    )
+    can_send_messages = models.BooleanField(
+        default=True,
+        help_text='Can send messages to connections',
+    )
+    can_view_photos = models.BooleanField(
+        default=True,
+        help_text='Can view profile photos',
+    )
+    can_see_who_viewed = models.BooleanField(
+        default=False,
+        help_text='Can see who viewed their profile',
+    )
+    priority_support = models.BooleanField(
+        default=False,
+        help_text='Priority customer support',
+    )
+    advanced_search = models.BooleanField(
+        default=False,
+        help_text='Access to advanced search filters',
+    )
+    verified_badge = models.BooleanField(
+        default=False,
+        help_text='Verified badge on profile',
+    )
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['price']
+        verbose_name = 'Subscription Plan'
+        verbose_name_plural = 'Subscription Plans'
+
+    def __str__(self):
+        return f'{self.name} ({self.tier})'
+
+
+class UserSubscription(models.Model):
+    """
+    Model to track user subscriptions.
+    """
+    class SubscriptionStatus(models.TextChoices):
+        ACTIVE = 'active', 'Active'
+        EXPIRED = 'expired', 'Expired'
+        CANCELLED = 'cancelled', 'Cancelled'
+        PENDING = 'pending', 'Pending'
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='subscription',
+        help_text='User who has this subscription',
+    )
+    plan = models.ForeignKey(
+        SubscriptionPlan,
+        on_delete=models.PROTECT,
+        related_name='user_subscriptions',
+        help_text='Subscription plan',
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=SubscriptionStatus.choices,
+        default=SubscriptionStatus.ACTIVE,
+        help_text='Current subscription status',
+    )
+    started_at = models.DateTimeField(
+        auto_now_add=True,
+        help_text='When the subscription started',
+    )
+    expires_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text='When the subscription expires (null for lifetime/free)',
+    )
+    auto_renew = models.BooleanField(
+        default=False,
+        help_text='Whether subscription auto-renews',
+    )
+    cancelled_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text='When the subscription was cancelled',
+    )
+    cancellation_reason = models.TextField(
+        blank=True,
+        help_text='Reason for cancellation',
+    )
+    
+    # Usage tracking
+    profile_views_used = models.IntegerField(
+        default=0,
+        help_text='Number of profile views used in current period',
+    )
+    connections_used = models.IntegerField(
+        default=0,
+        help_text='Number of connections used in current period',
+    )
+    connection_requests_used = models.IntegerField(
+        default=0,
+        help_text='Number of connection requests sent in current period',
+    )
+    chat_users_count = models.IntegerField(
+        default=0,
+        help_text='Number of different users user has chatted with',
+    )
+    sessions_used = models.IntegerField(
+        default=0,
+        help_text='Number of call sessions created in current period',
+    )
+    last_reset_at = models.DateTimeField(
+        auto_now_add=True,
+        help_text='When usage counters were last reset',
+    )
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = 'User Subscription'
+        verbose_name_plural = 'User Subscriptions'
+        indexes = [
+            models.Index(fields=['user', 'status']),
+            models.Index(fields=['status', 'expires_at']),
+        ]
+
+    def __str__(self):
+        return f'{self.user.username} - {self.plan.name} ({self.status})'
+
+    @property
+    def is_active(self):
+        """Check if subscription is currently active."""
+        if self.status != self.SubscriptionStatus.ACTIVE:
+            return False
+        if self.expires_at and timezone.now() > self.expires_at:
+            return False
+        return True
+
+    @property
+    def days_remaining(self):
+        """Get number of days remaining in subscription."""
+        if not self.expires_at:
+            return None  # Lifetime/free subscription
+        if not self.is_active:
+            return 0
+        delta = self.expires_at - timezone.now()
+        return max(0, delta.days)
+
+    def can_view_profile(self):
+        """Check if user can view another profile based on plan limits."""
+        if self.plan.max_profile_views == -1:
+            return True  # Unlimited
+        return self.profile_views_used < self.plan.max_profile_views
+
+    def can_make_connection(self):
+        """Check if user can make a new connection based on plan limits."""
+        if self.plan.max_connections == -1:
+            return True  # Unlimited
+        return self.connections_used < self.plan.max_connections
+
+    def can_send_connection_request(self):
+        """Check if user can send a new connection request based on plan limits."""
+        if self.plan.max_connection_requests == -1:
+            return True  # Unlimited
+        return self.connection_requests_used < self.plan.max_connection_requests
+
+    def can_chat_with_user(self, target_user):
+        """Check if user can chat with a specific user based on plan limits."""
+        if self.plan.max_chat_users == -1:
+            return True  # Unlimited
+        
+        # Check if user has already chatted with this user (in either direction)
+        # If they've chatted before, always allow (no limit check needed)
+        from .models import Message
+        has_chatted = Message.objects.filter(
+            Q(sender=self.user, receiver=target_user) |
+            Q(sender=target_user, receiver=self.user)
+        ).exists()
+        
+        if has_chatted:
+            return True  # Already chatting with this user, allow continuation
+        
+        # This is a new chat - check if user has reached their limit
+        # Count distinct users user has chatted with (combining sent and received)
+        # Get all unique user IDs user has chatted with
+        sent_to_users = set(
+            Message.objects.filter(sender=self.user)
+            .values_list('receiver_id', flat=True)
+            .distinct()
+        )
+        received_from_users = set(
+            Message.objects.filter(receiver=self.user)
+            .values_list('sender_id', flat=True)
+            .distinct()
+        )
+        
+        # Combine both sets to get total distinct chat partners
+        total_distinct_chat_users = len(sent_to_users | received_from_users)
+        
+        # User can chat if current count is less than the limit
+        # e.g., if limit is 1 and count is 0, they can chat (0 < 1 = True)
+        # if limit is 1 and count is 1, they cannot chat (1 < 1 = False)
+        return total_distinct_chat_users < self.plan.max_chat_users
+
+    def can_create_session(self):
+        """Check if user can create a new call session based on plan limits."""
+        if self.plan.max_sessions == -1:
+            return True  # Unlimited
+        return self.sessions_used < self.plan.max_sessions
+
+    def reset_usage(self):
+        """Reset usage counters (called monthly)."""
+        self.profile_views_used = 0
+        self.connections_used = 0
+        self.connection_requests_used = 0
+        self.sessions_used = 0
+        # Reset chat_users_count to allow fresh quota for new month
+        # The count will be recalculated dynamically when needed
+        self.chat_users_count = 0
+        self.last_reset_at = timezone.now()
+        self.save(update_fields=[
+            'profile_views_used',
+            'connections_used',
+            'connection_requests_used',
+            'sessions_used',
+            'chat_users_count',
+            'last_reset_at'
+        ])
+
