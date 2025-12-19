@@ -21,7 +21,9 @@ MAX_TOKENS = 220
 
 
 def _get_openai_api_key() -> str:
-    return os.getenv('OPENAI_API_KEY') or getattr(settings, 'OPENAI_API_KEY', None)
+    # Prioritize settings.OPENAI_API_KEY since it's loaded from .env at Django startup
+    # Fall back to os.getenv() for cases where settings might not be available
+    return getattr(settings, 'OPENAI_API_KEY', None) or os.getenv('OPENAI_API_KEY')
 
 
 def _profile_detail_lines(profile: UserProfile) -> Iterable[str]:

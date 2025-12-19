@@ -78,8 +78,9 @@ class CreateSessionView(SessionBaseView):
         
         # Use atomic transaction to check limits and create session in one operation
         with transaction.atomic():
-            # Lock and reload subscription with plan relationship to get latest values
-            # Use select_for_update to lock the row and prevent concurrent modifications
+            # Get or create subscription, then lock it for update
+            subscription = get_or_create_user_subscription(request.user)
+            # Reload with lock to get latest plan values
             subscription = UserSubscription.objects.select_related('plan').select_for_update().get(
                 user=request.user
             )

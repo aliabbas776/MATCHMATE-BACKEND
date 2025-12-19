@@ -32,14 +32,14 @@ class Command(BaseCommand):
             {
                 'tier': SubscriptionPlan.PlanTier.SILVER,
                 'name': 'Silver Plan',
-                'description': 'Enhanced features with more profile views and connections.',
+                'description': 'Enhanced features with more profile views and connections. Limited to 20 profile views, 10 connection requests, 3 chat users, and 7 sessions.',
                 'price': 9.99,
                 'duration_days': 30,
-                'max_profile_views': 50,
-                'max_connections': 20,
-                'max_connection_requests': -1,  # Unlimited
-                'max_chat_users': -1,  # Unlimited
-                'max_sessions': -1,  # Unlimited
+                'max_profile_views': 20,  # Limited to 20 profile views
+                'max_connections': 10,  # Limited to 10 connection requests
+                'max_connection_requests': -1,  # Not used - max_connections is used instead
+                'max_chat_users': 3,  # Limited to 3 chat users
+                'max_sessions': 7,  # Limited to 7 sessions
                 'can_send_messages': True,
                 'can_view_photos': True,
                 'can_see_who_viewed': True,
@@ -50,14 +50,14 @@ class Command(BaseCommand):
             {
                 'tier': SubscriptionPlan.PlanTier.GOLD,
                 'name': 'Gold Plan',
-                'description': 'Premium features with unlimited profile views and more connections.',
+                'description': 'Premium features with extended limits. Limited to 30 profile views, 15 connection requests, 5 chat users, and 10 sessions.',
                 'price': 19.99,
                 'duration_days': 30,
-                'max_profile_views': -1,  # Unlimited
-                'max_connections': 50,
-                'max_connection_requests': -1,  # Unlimited
-                'max_chat_users': -1,  # Unlimited
-                'max_sessions': -1,  # Unlimited
+                'max_profile_views': 30,  # Limited to 30 profile views
+                'max_connections': 15,  # Limited to 15 connection requests
+                'max_connection_requests': -1,  # Not used - max_connections is used instead
+                'max_chat_users': 5,  # Limited to 5 chat users
+                'max_sessions': 10,  # Limited to 10 sessions
                 'can_send_messages': True,
                 'can_view_photos': True,
                 'can_see_who_viewed': True,

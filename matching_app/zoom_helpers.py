@@ -51,27 +51,49 @@ def get_zoom_access_token() -> str:
     # Request access token
     # Note: For Server-to-Server OAuth, scopes must be configured in Zoom Marketplace app settings
     # The required scopes are: meeting:write:meeting and meeting:write:meeting:admin
-    auth_url = f"{settings.ZOOM_OAUTH_URL}?grant_type=account_credentials&account_id={settings.ZOOM_ACCOUNT_ID}"
+    # Parameters must be in the request body, not query string
     headers = {
         'Authorization': f'Basic {encoded_credentials}',
         'Content-Type': 'application/x-www-form-urlencoded'
     }
+    request_data = {
+        'grant_type': 'account_credentials',
+        'account_id': settings.ZOOM_ACCOUNT_ID
+    }
     
     try:
-        response = requests.post(auth_url, headers=headers, timeout=10)
+        response = requests.post(settings.ZOOM_OAUTH_URL, headers=headers, data=request_data, timeout=10)
         response.raise_for_status()
         
-        data = response.json()
-        access_token = data.get('access_token')
+        response_data = response.json()
+        access_token = response_data.get('access_token')
         
         if not access_token:
-            raise ValueError(f"Failed to get access token: {data}")
+            raise ValueError(f"Failed to get access token: {response_data}")
         
         # Cache token for 55 minutes (tokens expire in 1 hour)
         cache.set('zoom_access_token', access_token, 55 * 60)
         
         return access_token
         
+    except requests.exceptions.HTTPError as e:
+        error_msg = f"Failed to authenticate with Zoom API: {e.response.status_code}"
+        try:
+            error_data = e.response.json()
+            # Zoom API error responses can have different structures
+            error_detail = (
+                error_data.get('reason') or 
+                error_data.get('message') or 
+                error_data.get('error') or 
+                error_data.get('error_description') or
+                str(error_data)
+            )
+            error_msg += f" - {error_detail}"
+            # Include full response for debugging
+            error_msg += f"\nFull Zoom response: {error_data}"
+        except:
+            error_msg += f" - {e.response.text}"
+        raise Exception(error_msg)
     except requests.exceptions.RequestException as e:
         raise Exception(f"Failed to authenticate with Zoom API: {str(e)}")
     except Exception as e:

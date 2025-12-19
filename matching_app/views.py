@@ -16,7 +16,7 @@ from django.utils import timezone
 from django.db.models import F
 from django.db import transaction
 
-from .models import CNICVerification, MatchPreference, SubscriptionPlan, UserProfile, UserReport, UserSubscription
+from .models import CNICVerification, MatchPreference, SubscriptionPlan, UserProfile, UserProfileImage, UserReport, UserSubscription
 
 from .ocr_utils import analyze_cnic_images
 from .openai_helpers import generate_profile_description, validate_profile_photo
@@ -324,7 +324,7 @@ class LoginView(APIView):
             )
         
         refresh = RefreshToken.for_user(user)
-        profile = getattr(user, 'profile', None)
+        profile = get_or_create_user_profile(user)
         has_profile = bool(profile and profile.is_completed)
 
         return Response(
@@ -462,46 +462,6 @@ class UserProfileView(APIView):
             )
 
 
-class ProfileCompletionView(APIView):
-    """
-    Authenticated endpoint that returns profile completion percentage.
-    """
-
-    authentication_classes = [JWTAuthentication]
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-        """Get profile completion percentage."""
-        profile = get_or_create_user_profile(request.user)
-        completion_data = profile.get_completion_percentage()
-        return Response(completion_data, status=status.HTTP_200_OK)
-
-
-class DashboardProfileCompletionView(APIView):
-    """
-    Authenticated endpoint for dashboard that returns profile completion percentage.
-    Returns a simple, dashboard-friendly response with completion percentage.
-    """
-
-    authentication_classes = [JWTAuthentication]
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-        """Get profile completion percentage for dashboard."""
-        profile = get_or_create_user_profile(request.user)
-        completion_data = profile.get_completion_percentage()
-        
-        # Return a clean, dashboard-friendly response
-        return Response(
-            {
-                'completion_percentage': completion_data['completion_percentage'],
-                'is_completed': completion_data['is_completed'],
-                'message': f"Your profile is {completion_data['completion_percentage']}% complete",
-            },
-            status=status.HTTP_200_OK,
-        )
-
-
 class ProfileDescriptionView(APIView):
     """
     Authenticated endpoint that uses OpenAI to create a short dating app
@@ -587,6 +547,150 @@ class ProfilePhotoUploadView(APIView):
             {'allowed': True, 'reason': 'Photo accepted.', 'profile_picture': image_url},
             status=status.HTTP_200_OK,
         )
+
+
+class ProfileImagesUploadView(APIView):
+    """
+    Upload multiple images for user profile.
+    Accepts multiple image files and validates them using OpenAI Vision.
+    """
+
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request):
+        # Check if profile is disabled
+        try:
+            profile_check = UserProfile.objects.get(user=request.user)
+            if profile_check.is_disabled:
+                return Response(
+                    {
+                        'allowed': False,
+                        'reason': 'Your profile has been disabled due to multiple reports. Please contact admin for assistance.',
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+        except UserProfile.DoesNotExist:
+            pass
+        
+        # Get multiple files - can be 'images' (list) or 'image' (single)
+        uploaded_files = []
+        if 'images' in request.FILES:
+            uploaded_files = request.FILES.getlist('images')
+        elif 'image' in request.FILES:
+            uploaded_files = [request.FILES.get('image')]
+        elif 'files' in request.FILES:
+            uploaded_files = request.FILES.getlist('files')
+        elif 'file' in request.FILES:
+            uploaded_files = [request.FILES.get('file')]
+        
+        if not uploaded_files:
+            return Response(
+                {'allowed': False, 'reason': 'No image files were provided.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        profile = get_or_create_user_profile(request.user)
+        uploaded_images = []
+        errors = []
+
+        for idx, upload in enumerate(uploaded_files):
+            try:
+                image_bytes = upload.read()
+                allowed, reason = validate_profile_photo(image_bytes, upload.name)
+                if not allowed:
+                    errors.append({
+                        'file': upload.name,
+                        'reason': reason
+                    })
+                    continue
+
+                # Create UserProfileImage instance
+                profile_image = UserProfileImage.objects.create(
+                    profile=profile,
+                    image=ContentFile(image_bytes, name=upload.name),
+                    order=idx,
+                )
+                image_url = request.build_absolute_uri(profile_image.image.url)
+                uploaded_images.append({
+                    'id': profile_image.id,
+                    'url': image_url,
+                    'order': profile_image.order,
+                })
+            except Exception as e:
+                errors.append({
+                    'file': upload.name,
+                    'reason': f'Failed to process image: {str(e)}'
+                })
+
+        if not uploaded_images and errors:
+            return Response(
+                {
+                    'allowed': False,
+                    'reason': 'All images were rejected.',
+                    'errors': errors,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return Response(
+            {
+                'allowed': True,
+                'reason': f'Successfully uploaded {len(uploaded_images)} image(s).',
+                'images': uploaded_images,
+                'errors': errors if errors else None,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+    def get(self, request):
+        """Get all images for the user's profile."""
+        profile = get_or_create_user_profile(request.user)
+        images = profile.images.all()
+        
+        image_list = []
+        for img in images:
+            image_url = request.build_absolute_uri(img.image.url)
+            image_list.append({
+                'id': img.id,
+                'url': image_url,
+                'order': img.order,
+                'created_at': img.created_at.isoformat(),
+            })
+        
+            return Response(
+                {
+                    'images': image_list,
+                    'count': len(image_list),
+                },
+                status=status.HTTP_200_OK,
+            )
+
+
+class ProfileImageDeleteView(APIView):
+    """
+    Delete a specific profile image by ID.
+    """
+
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, image_id):
+        """Delete a specific image by ID."""
+        try:
+            profile = get_or_create_user_profile(request.user)
+            image = profile.images.get(id=image_id)
+            image.delete()
+            return Response(
+                {'success': True, 'message': 'Image deleted successfully.'},
+                status=status.HTTP_200_OK,
+            )
+        except UserProfileImage.DoesNotExist:
+            return Response(
+                {'error': 'Image not found.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
 
 
 class CNICVerificationView(APIView):
@@ -1077,7 +1181,9 @@ class UserProfileDetailView(APIView):
         
         # Check subscription limits for profile views
         with transaction.atomic():
-            # Lock and reload subscription with plan relationship to get latest values
+            # Get or create subscription, then lock it for update
+            subscription = get_or_create_user_subscription(request.user)
+            # Reload with lock to get latest plan values
             subscription = UserSubscription.objects.select_related('plan').select_for_update().get(
                 user=request.user
             )

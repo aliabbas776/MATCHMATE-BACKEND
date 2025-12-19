@@ -412,6 +412,36 @@ class CNICVerification(models.Model):
         return f'CNICVerification<{self.user_id}> {self.status}'
 
 
+class UserProfileImage(models.Model):
+    """
+    Model to store multiple images for a user profile.
+    """
+    profile = models.ForeignKey(
+        UserProfile,
+        on_delete=models.CASCADE,
+        related_name='images',
+        help_text='Profile that owns this image',
+    )
+    image = models.ImageField(
+        upload_to='profiles/images/',
+        help_text='Profile image file',
+    )
+    order = models.PositiveIntegerField(
+        default=0,
+        help_text='Order/position of image (for sorting)',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['order', 'created_at']
+        verbose_name = 'Profile Image'
+        verbose_name_plural = 'Profile Images'
+
+    def __str__(self):
+        return f'Image {self.id} for {self.profile.user.username}'
+
+
 class UserConnection(models.Model):
     class Status(models.TextChoices):
         PENDING = 'pending', 'Pending'

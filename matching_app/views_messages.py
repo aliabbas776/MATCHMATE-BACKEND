@@ -50,7 +50,9 @@ class SendMessageView(MessageBaseView):
         
         # Use atomic transaction to check limits and create message in one operation
         with transaction.atomic():
-            # Lock and reload subscription with plan relationship to get latest values
+            # Get or create subscription, then lock it for update
+            subscription = get_or_create_user_subscription(request.user)
+            # Reload with lock to get latest plan values
             subscription = UserSubscription.objects.select_related('plan').select_for_update().get(
                 user=request.user
             )
@@ -70,18 +72,20 @@ class SendMessageView(MessageBaseView):
             # First check if limit applies (not unlimited)
             max_chat_users_limit = subscription.plan.max_chat_users
             
+            # Check if user has already chatted with this receiver before
+            # This check happens BEFORE message creation to determine if this is a NEW chat
+            has_chatted_before = Message.objects.filter(
+                Q(sender=request.user, receiver=receiver) |
+                Q(sender=receiver, receiver=request.user)
+            ).exists()
+            
             # ENFORCE CHAT LIMIT: If limit is set (not -1), check if user can start new chat
             if max_chat_users_limit != -1:
-                # Check if user has already chatted with this receiver before
-                has_chatted_before = Message.objects.filter(
-                    Q(sender=request.user, receiver=receiver) |
-                    Q(sender=receiver, receiver=request.user)
-                ).exists()
-                
                 # If they haven't chatted with this user before, we need to check the limit
                 # because this would be a NEW chat
                 if not has_chatted_before:
                     # Count distinct users user has chatted with (EXCLUDING current receiver)
+                    # This must be done within the transaction to ensure accuracy
                     sent_to_users = set(
                         Message.objects.filter(sender=request.user)
                         .values_list('receiver_id', flat=True)
@@ -95,9 +99,14 @@ class SendMessageView(MessageBaseView):
                     # Get all users they've chatted with (combining sent and received)
                     distinct_chat_users = len(sent_to_users | received_from_users)
                     
-                    # If they've already reached the limit, block this new chat
-                    # Example: limit=1, they've chatted with 1 user, distinct_chat_users=1
-                    # 1 >= 1 → True → BLOCK
+                    # CRITICAL: Block if user has reached or exceeded the limit
+                    # If limit is 5, they can chat with users 1, 2, 3, 4, 5 (5 users total)
+                    # When they try to start the 6th chat, distinct_chat_users = 5
+                    # 5 >= 5 → True → BLOCK (correct - they already have 5 users)
+                    # When they try to start the 5th chat, distinct_chat_users = 4
+                    # 4 >= 5 → False → ALLOW (correct - can start 5th chat)
+                    # When they try to start the 3rd chat, distinct_chat_users = 2
+                    # 2 >= 5 → False → ALLOW (correct - can start 3rd chat)
                     if distinct_chat_users >= max_chat_users_limit:
                         return Response(
                             {
@@ -112,20 +121,19 @@ class SendMessageView(MessageBaseView):
                         )
                 # If has_chatted_before is True, they've already chatted with this user,
                 # so we allow them to continue (no limit check needed for existing chats)
+                # This allows users to continue conversations even if they exceeded the limit
+                # (e.g., if limit was changed after they already started chatting)
             
-            # Check if this user has chatted with this receiver before
-            # This is to determine if we should increment chat_users_count
-            has_user_chatted_before = Message.objects.filter(
-                Q(sender=request.user, receiver=receiver) |
-                Q(sender=receiver, receiver=request.user)
-            ).exists()
-            
-            # Only create message if limit check passes
+            # Only create message if limit check passes (limit check was done above)
             message = serializer.save()
             
             # Increment chat_users_count if this is the first time this user is chatting with receiver
-            # (i.e., no previous messages exist between these two users)
-            if not has_user_chatted_before:
+            # (i.e., no previous messages existed between these two users BEFORE this message was created)
+            # This ensures chat_users_count stays in sync with actual distinct chat users
+            if not has_chatted_before:
+                # Atomically increment chat_users_count using F() expression
+                # This ensures thread-safe updates even with concurrent requests
+                # The increment happens within the same transaction, so it's guaranteed to be consistent
                 UserSubscription.objects.filter(user=request.user).update(
                     chat_users_count=F('chat_users_count') + 1
                 )

@@ -56,7 +56,9 @@ class ConnectionRequestView(ConnectionBaseView):
         
         # Use atomic transaction to check limits and create connection in one operation
         with transaction.atomic():
-            # Lock and reload subscription with plan relationship to get latest values
+            # Get or create subscription, then lock it for update
+            subscription = get_or_create_user_subscription(request.user)
+            # Reload with lock to get latest plan values
             subscription = UserSubscription.objects.select_related('plan').select_for_update().get(
                 user=request.user
             )
@@ -75,13 +77,34 @@ class ConnectionRequestView(ConnectionBaseView):
             # Check connection request limit using max_connections (not max_connection_requests)
             # max_connections means the limit on connection requests user can send
             if subscription.plan.max_connections != -1:  # Not unlimited
-                if subscription.connections_used >= subscription.plan.max_connections:
+                # Count actual connection requests sent by this user since last reset (monthly limit)
+                # This ensures accuracy even if the connections_used field is out of sync
+                # Only count connections created since the last reset date (or subscription start if no reset)
+                query = UserConnection.objects.filter(from_user=request.user)
+                
+                # Use last_reset_at if available, otherwise use subscription start date
+                # This ensures we only count connections from the current billing period
+                reset_date = subscription.last_reset_at if subscription.last_reset_at else subscription.started_at
+                if reset_date:
+                    query = query.filter(created_at__gte=reset_date)
+                
+                # Count within the transaction to ensure accuracy
+                actual_connections_sent = query.count()
+                
+                # CRITICAL: Block if user has reached or exceeded the limit
+                # If limit is 15, they can send requests 1-15 (15 total)
+                # When they try to send the 16th, actual_connections_sent = 15
+                # 15 >= 15 → True → BLOCK (correct - prevents 16th request)
+                # When they try to send the 15th, actual_connections_sent = 14
+                # 14 >= 15 → False → ALLOW (correct - allows 15th request)
+                # The check uses >= to ensure we block when limit is reached, not exceeded
+                if actual_connections_sent >= subscription.plan.max_connections:
                     return Response(
                         {
                             'error': 'Connection Request Limit Exceeded',
-                            'detail': f'You have reached your monthly limit of {subscription.plan.max_connections} connection requests.',
+                            'detail': f'You have reached your monthly limit of {subscription.plan.max_connections} connection requests. You have sent {actual_connections_sent} connection request(s).',
                             'limit': subscription.plan.max_connections,
-                            'used': subscription.connections_used,
+                            'used': actual_connections_sent,
                             'upgrade_required': True,
                             'message': 'Please upgrade your subscription plan to send more connection requests.',
                         },

@@ -24,6 +24,7 @@ from .models import (
     SubscriptionPlan,
     UserConnection,
     UserProfile,
+    UserProfileImage,
     UserReport,
     UserSubscription,
 )
@@ -354,12 +355,19 @@ class UserProfileSectionSerializer(serializers.ModelSerializer):
                     'is_public',
                 ],
             ),
+            (
+                'images',
+                [
+                    'images',
+                ],
+            ),
         ]
     )
     profile_picture = serializers.ImageField(required=False, allow_null=True)
     has_disability = serializers.BooleanField(required=False)
     generated_description = serializers.CharField(read_only=True)
     email = serializers.EmailField(required=False, write_only=False)
+    images = serializers.SerializerMethodField()
 
     class Meta:
         model = UserProfile
@@ -397,8 +405,9 @@ class UserProfileSectionSerializer(serializers.ModelSerializer):
             'cnic_number',
             'cnic_verification_status',
             'cnic_verified_at',
+            'images',
         ]
-        read_only_fields = ['generated_description', 'cnic_verification_status', 'cnic_verified_at']
+        read_only_fields = ['generated_description', 'cnic_verification_status', 'cnic_verified_at', 'images']
 
     def _as_plain_mapping(self, data):
         if isinstance(data, QueryDict):
@@ -466,6 +475,24 @@ class UserProfileSectionSerializer(serializers.ModelSerializer):
         flattened = self._flatten_sections(data)
         return super().to_internal_value(flattened)
 
+    def get_images(self, instance):
+        """Get all images for the profile as an array."""
+        request = self.context.get('request')
+        images = instance.images.all()
+        image_list = []
+        for img in images:
+            if request:
+                image_url = request.build_absolute_uri(img.image.url)
+            else:
+                image_url = img.image.url if img.image else None
+            image_list.append({
+                'id': img.id,
+                'url': image_url,
+                'order': img.order,
+                'created_at': img.created_at.isoformat() if img.created_at else None,
+            })
+        return image_list
+
     def to_representation(self, instance):
         rep = super().to_representation(instance)
         # Add email from user model
@@ -474,10 +501,16 @@ class UserProfileSectionSerializer(serializers.ModelSerializer):
         request = self.context.get('request')
         helper = get_photo_visibility_helper(self.context)
         rep['profile_picture'] = resolve_profile_picture_url(instance, request, helper)
+        
+        # Get images array
+        images_data = rep.pop('images', [])
 
         sectioned = OrderedDict()
         for section, fields in self.section_field_map.items():
             sectioned[section] = {field: rep.pop(field, None) for field in fields}
+        
+        # Add images to the images section
+        sectioned['images'] = images_data
 
         generated_description = rep.pop('generated_description', None)
         cnic_number = rep.pop('cnic_number', None)
@@ -505,6 +538,17 @@ class UserProfileSectionSerializer(serializers.ModelSerializer):
                 'status': cnic_status,
                 'verified_at': verified_at,
             }
+        
+        # Add profile completion percentage
+        completion_data = instance.get_completion_percentage()
+        sectioned['profile_completion'] = {
+            'completion_percentage': completion_data['completion_percentage'],
+            'is_completed': completion_data['is_completed'],
+            'completed_fields': completion_data['completed_fields'],
+            'total_fields': completion_data['total_fields'],
+            'sections': completion_data['sections'],
+        }
+        
         return sectioned
 
     def save(self, **kwargs):
