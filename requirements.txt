@@ -1,0 +1,9 @@
+Django
+djangorestframework
+djangorestframework-simplejwt
+python-dotenv
+psycopg2-binary
+requests
+openai
+Pillow
+
