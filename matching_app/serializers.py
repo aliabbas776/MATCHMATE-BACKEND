@@ -1079,6 +1079,11 @@ class SessionSerializer(serializers.ModelSerializer):
     participant_id = serializers.IntegerField(source='participant.id', read_only=True)
     initiator = SessionUserSerializer(read_only=True)
     participant = SessionUserSerializer(read_only=True)
+    started_by = SessionUserSerializer(read_only=True)
+    initiator_ready = serializers.BooleanField(read_only=True)
+    participant_ready = serializers.BooleanField(read_only=True)
+    can_join = serializers.SerializerMethodField()
+    is_initiator = serializers.SerializerMethodField()
 
     class Meta:
         model = models.Session
@@ -1092,10 +1097,31 @@ class SessionSerializer(serializers.ModelSerializer):
             'zoom_meeting_id',
             'zoom_meeting_url',
             'zoom_meeting_password',
+            'initiator_ready',
+            'participant_ready',
+            'can_join',
+            'is_initiator',
+            'started_at',
+            'ended_at',
+            'started_by',
             'created_at',
             'updated_at',
         ]
         read_only_fields = fields
+
+    def get_can_join(self, obj):
+        """Check if the requesting user can join the session."""
+        request = self.context.get('request')
+        if request and request.user:
+            return obj.can_join(request.user)
+        return False
+
+    def get_is_initiator(self, obj):
+        """Check if the requesting user is the initiator."""
+        request = self.context.get('request')
+        if request and request.user:
+            return request.user == obj.initiator
+        return False
 
 
 class SessionCreateSerializer(serializers.Serializer):
