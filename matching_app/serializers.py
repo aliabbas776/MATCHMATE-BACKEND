@@ -1643,6 +1643,18 @@ class UserSubscriptionSerializer(serializers.ModelSerializer):
     days_remaining = serializers.SerializerMethodField()
     is_active_display = serializers.SerializerMethodField()
     
+    # Remaining quota fields
+    profile_views_remaining = serializers.SerializerMethodField()
+    connections_remaining = serializers.SerializerMethodField()
+    chat_users_remaining = serializers.SerializerMethodField()
+    sessions_remaining = serializers.SerializerMethodField()
+    
+    # Quota limits
+    profile_views_limit = serializers.SerializerMethodField()
+    connections_limit = serializers.SerializerMethodField()
+    chat_users_limit = serializers.SerializerMethodField()
+    sessions_limit = serializers.SerializerMethodField()
+    
     class Meta:
         model = UserSubscription
         fields = [
@@ -1664,6 +1676,16 @@ class UserSubscriptionSerializer(serializers.ModelSerializer):
             'last_reset_at',
             'days_remaining',
             'is_active_display',
+            # Remaining quotas
+            'profile_views_remaining',
+            'connections_remaining',
+            'chat_users_remaining',
+            'sessions_remaining',
+            # Quota limits
+            'profile_views_limit',
+            'connections_limit',
+            'chat_users_limit',
+            'sessions_limit',
             'created_at',
             'updated_at',
         ]
@@ -1692,6 +1714,75 @@ class UserSubscriptionSerializer(serializers.ModelSerializer):
     def get_is_active_display(self, obj):
         """Get if subscription is active."""
         return obj.is_active
+    
+    def get_profile_views_limit(self, obj):
+        """Get profile views limit for the plan."""
+        if obj.plan.max_profile_views == -1:
+            return None  # Unlimited
+        return obj.plan.max_profile_views
+    
+    def get_connections_limit(self, obj):
+        """Get connections limit for the plan."""
+        if obj.plan.max_connections == -1:
+            return None  # Unlimited
+        return obj.plan.max_connections
+    
+    def get_chat_users_limit(self, obj):
+        """Get chat users limit for the plan."""
+        if obj.plan.max_chat_users == -1:
+            return None  # Unlimited
+        return obj.plan.max_chat_users
+    
+    def get_sessions_limit(self, obj):
+        """Get sessions limit for the plan."""
+        if obj.plan.max_sessions == -1:
+            return None  # Unlimited
+        return obj.plan.max_sessions
+    
+    def get_profile_views_remaining(self, obj):
+        """Get remaining profile views."""
+        if obj.plan.max_profile_views == -1:
+            return None  # Unlimited
+        remaining = obj.plan.max_profile_views - obj.profile_views_used
+        return max(0, remaining)
+    
+    def get_connections_remaining(self, obj):
+        """Get remaining connections."""
+        if obj.plan.max_connections == -1:
+            return None  # Unlimited
+        remaining = obj.plan.max_connections - obj.connections_used
+        return max(0, remaining)
+    
+    def get_chat_users_remaining(self, obj):
+        """Get remaining chat users."""
+        if obj.plan.max_chat_users == -1:
+            return None  # Unlimited
+        
+        # Calculate actual distinct chat users
+        from .models import Message
+        from django.db.models import Q
+        
+        sent_to_users = set(
+            Message.objects.filter(sender=obj.user)
+            .values_list('receiver_id', flat=True)
+            .distinct()
+        )
+        received_from_users = set(
+            Message.objects.filter(receiver=obj.user)
+            .values_list('sender_id', flat=True)
+            .distinct()
+        )
+        total_distinct_chat_users = len(sent_to_users | received_from_users)
+        
+        remaining = obj.plan.max_chat_users - total_distinct_chat_users
+        return max(0, remaining)
+    
+    def get_sessions_remaining(self, obj):
+        """Get remaining sessions."""
+        if obj.plan.max_sessions == -1:
+            return None  # Unlimited
+        remaining = obj.plan.max_sessions - obj.sessions_used
+        return max(0, remaining)
 
 
 class SubscriptionUpgradeSerializer(serializers.Serializer):

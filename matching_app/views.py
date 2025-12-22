@@ -1451,6 +1451,76 @@ class UserSubscriptionView(APIView):
         )
 
 
+class SubscriptionUsageView(APIView):
+    """
+    Authenticated endpoint to get user's subscription usage and remaining quotas.
+    """
+
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        """Get current user's subscription usage and remaining quotas."""
+        from .models import Message
+        from django.db.models import Q
+        
+        subscription = get_or_create_user_subscription(request.user)
+        serializer = UserSubscriptionSerializer(subscription)
+        
+        # Calculate actual distinct chat users count
+        sent_to_users = set(
+            Message.objects.filter(sender=subscription.user)
+            .values_list('receiver_id', flat=True)
+            .distinct()
+        )
+        received_from_users = set(
+            Message.objects.filter(receiver=subscription.user)
+            .values_list('sender_id', flat=True)
+            .distinct()
+        )
+        actual_chat_users_count = len(sent_to_users | received_from_users)
+        
+        # Return focused usage/quota information
+        usage_data = {
+            'plan': {
+                'id': subscription.plan.id,
+                'tier': subscription.plan.tier,
+                'name': subscription.plan.name,
+            },
+            'quota': {
+                'profile_views': {
+                    'used': subscription.profile_views_used,
+                    'limit': serializer.data['profile_views_limit'],
+                    'remaining': serializer.data['profile_views_remaining'],
+                },
+                'connections': {
+                    'used': subscription.connections_used,
+                    'limit': serializer.data['connections_limit'],
+                    'remaining': serializer.data['connections_remaining'],
+                },
+                'chat_users': {
+                    'used': actual_chat_users_count,
+                    'limit': serializer.data['chat_users_limit'],
+                    'remaining': serializer.data['chat_users_remaining'],
+                },
+                'sessions': {
+                    'used': subscription.sessions_used,
+                    'limit': serializer.data['sessions_limit'],
+                    'remaining': serializer.data['sessions_remaining'],
+                },
+            },
+            'subscription_status': {
+                'status': subscription.status,
+                'is_active': serializer.data['is_active_display'],
+                'days_remaining': serializer.data['days_remaining'],
+                'expires_at': serializer.data['expires_at'],
+            },
+            'last_reset_at': serializer.data['last_reset_at'],
+        }
+        
+        return Response(usage_data, status=status.HTTP_200_OK)
+
+
 class SubscriptionCancelView(APIView):
     """
     Authenticated endpoint to cancel user's subscription.

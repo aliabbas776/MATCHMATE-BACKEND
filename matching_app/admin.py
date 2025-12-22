@@ -99,6 +99,7 @@ class CNICVerificationAdmin(admin.ModelAdmin):
     list_filter = ('status', 'tampering_detected')
     search_fields = ('user__username', 'user__email', 'extracted_full_name', 'extracted_cnic')
     readonly_fields = ('created_at', 'updated_at')
+    actions = ['sync_status_to_profile']
     
     fieldsets = (
         ('User Information', {'fields': ('user',)}),
@@ -121,6 +122,87 @@ class CNICVerificationAdmin(admin.ModelAdmin):
         }),
         ('Timestamps', {'fields': ('created_at', 'updated_at'), 'classes': ('collapse',)}),
     )
+    
+    def save_model(self, request, obj, form, change):
+        """Override save_model to ensure status sync happens."""
+        # Store old status before saving
+        old_status = None
+        if change and obj.pk:
+            try:
+                old_instance = CNICVerification.objects.get(pk=obj.pk)
+                old_status = old_instance.status
+            except CNICVerification.DoesNotExist:
+                pass
+        
+        # Save the model (this will trigger the signal)
+        super().save_model(request, obj, form, change)
+        
+        # Manually trigger sync if signal didn't fire (backup)
+        if change and old_status != obj.status:
+            try:
+                profile = obj.user.profile
+                from django.utils import timezone
+                
+                status_mapping = {
+                    CNICVerification.Status.PENDING: 'pending',
+                    CNICVerification.Status.VERIFIED: 'verified',
+                    CNICVerification.Status.REJECTED: 'rejected',
+                }
+                
+                new_status = status_mapping.get(obj.status, 'unverified')
+                
+                if profile.cnic_verification_status != new_status:
+                    profile.cnic_verification_status = new_status
+                    
+                    if obj.status == CNICVerification.Status.VERIFIED:
+                        profile.cnic_verified_at = timezone.now()
+                    elif obj.status == CNICVerification.Status.REJECTED:
+                        profile.cnic_verified_at = None
+                    
+                    profile.save(update_fields=['cnic_verification_status', 'cnic_verified_at'])
+            except UserProfile.DoesNotExist:
+                pass
+    
+    def sync_status_to_profile(self, request, queryset):
+        """Admin action to manually sync CNIC verification status to UserProfile."""
+        from django.utils import timezone
+        synced_count = 0
+        skipped_count = 0
+        
+        for cnic_verification in queryset:
+            try:
+                profile = cnic_verification.user.profile
+                # Map CNICVerification status to UserProfile status
+                status_mapping = {
+                    CNICVerification.Status.PENDING: 'pending',
+                    CNICVerification.Status.VERIFIED: 'verified',
+                    CNICVerification.Status.REJECTED: 'rejected',
+                }
+                
+                new_status = status_mapping.get(cnic_verification.status, 'unverified')
+                
+                if profile.cnic_verification_status != new_status:
+                    profile.cnic_verification_status = new_status
+                    
+                    # Update verified_at timestamp
+                    if cnic_verification.status == CNICVerification.Status.VERIFIED:
+                        profile.cnic_verified_at = timezone.now()
+                    elif cnic_verification.status == CNICVerification.Status.REJECTED:
+                        profile.cnic_verified_at = None
+                    
+                    profile.save(update_fields=['cnic_verification_status', 'cnic_verified_at'])
+                    synced_count += 1
+                else:
+                    skipped_count += 1
+            except UserProfile.DoesNotExist:
+                pass
+        
+        self.message_user(
+            request,
+            f'Successfully synced {synced_count} profile(s). {skipped_count} already synced.'
+        )
+    
+    sync_status_to_profile.short_description = 'Sync status to UserProfile'
 
 
 @admin.register(MatchPreference)
