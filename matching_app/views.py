@@ -22,6 +22,7 @@ from .ocr_utils import analyze_cnic_images
 from .openai_helpers import generate_profile_description, validate_profile_photo
 from .serializers import (
     CNICVerificationSerializer,
+    ChangePasswordSerializer,
     LoginSerializer,
     MatchPreferenceSerializer,
     PasswordResetConfirmSerializer,
@@ -940,6 +941,32 @@ class UserAccountView(APIView):
         # Return the updated data
         response_serializer = UserAccountSerializer(updated_user)
         return Response(response_serializer.data, status=status.HTTP_200_OK)
+
+
+class ChangePasswordView(APIView):
+    """
+    Authenticated endpoint for changing password.
+    """
+
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    parser_classes = [JSONParser, FormParser]
+
+    def post(self, request):
+        """Change user password."""
+        # Ensure we have a fresh user instance from the database
+        user = User.objects.get(pk=request.user.pk)
+        serializer = ChangePasswordSerializer(
+            data=request.data,
+            context={'request': request},
+        )
+        if serializer.is_valid():
+            serializer.save()
+            return Response(
+                {'detail': 'Password has been changed successfully.'},
+                status=status.HTTP_200_OK,
+            )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
 class UserAccountDeleteView(APIView):

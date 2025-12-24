@@ -1,6 +1,7 @@
 from django.urls import include, path
 
 from .views import (
+    ChangePasswordView,
     CNICVerificationView,
     LoginView,
     MatchPreferenceView,
@@ -31,6 +32,7 @@ urlpatterns = [
     path('password-reset/request/', PasswordResetRequestView.as_view(), name='password-reset-request'),
     path('password-reset/confirm/', PasswordResetConfirmView.as_view(), name='password-reset-confirm'),
     path('account/', UserAccountView.as_view(), name='account'),
+    path('account/change-password/', ChangePasswordView.as_view(), name='change-password'),
     path('account/delete/', UserAccountDeleteView.as_view(), name='account-delete'),
     path('profile/', UserProfileView.as_view(), name='profile'),
     path('profile/<int:user_id>/', UserProfileDetailView.as_view(), name='profile-detail'),

@@ -67,6 +67,16 @@ class RegistrationSerializer(serializers.ModelSerializer):
         ]
 
     def validate(self, attrs):
+        # Trim whitespace from inputs
+        if 'email' in attrs:
+            attrs['email'] = attrs['email'].strip() if attrs['email'] else attrs['email']
+        if 'username' in attrs:
+            attrs['username'] = attrs['username'].strip() if attrs['username'] else attrs['username']
+        if 'password' in attrs:
+            attrs['password'] = attrs['password'].strip() if attrs['password'] else attrs['password']
+        if 'confirm_password' in attrs:
+            attrs['confirm_password'] = attrs['confirm_password'].strip() if attrs['confirm_password'] else attrs['confirm_password']
+        
         if attrs['password'] != attrs['confirm_password']:
             raise serializers.ValidationError('Passwords do not match.')
 
@@ -85,6 +95,9 @@ class RegistrationSerializer(serializers.ModelSerializer):
         phone_number = validated_data.pop('phone_number')
         profile_picture = validated_data.pop('profile_picture', None)
         password = validated_data.pop('password')
+        
+        # Ensure password is trimmed (should already be from validate, but double-check)
+        password = password.strip() if password else password
 
         user = User.objects.create_user(password=password, **validated_data)
         UserProfile.objects.create(
@@ -108,6 +121,10 @@ class LoginSerializer(serializers.Serializer):
         password = attrs.get('password')
 
         if email and password:
+            # Trim whitespace from email and password
+            email = email.strip() if email else email
+            password = password.strip() if password else password
+            
             # Try to get user by email (case-insensitive)
             # Use filter().first() to handle cases where multiple users exist with same email
             user = User.objects.filter(email__iexact=email).first()
@@ -118,7 +135,13 @@ class LoginSerializer(serializers.Serializer):
             if not user.is_active:
                 raise serializers.ValidationError('User account is disabled.')
 
-            # Check password directly (more reliable than authenticate)
+            # Get fresh user instance from database to ensure we have the latest password hash
+            try:
+                user = User.objects.get(pk=user.pk)
+            except User.DoesNotExist:
+                raise serializers.ValidationError('Invalid email or password.')
+            
+            # Check password directly - this is the most reliable method
             if not user.check_password(password):
                 raise serializers.ValidationError('Invalid email or password.')
 
@@ -587,6 +610,55 @@ class UserAccountSerializer(serializers.ModelSerializer):
         if User.objects.filter(username=value).exclude(id=user.id).exists():
             raise serializers.ValidationError('A user with this username already exists.')
         return value
+
+
+class ChangePasswordSerializer(serializers.Serializer):
+    """Serializer for changing password (authenticated users)."""
+    
+    current_password = serializers.CharField(
+        write_only=True,
+        required=True,
+        style={'input_type': 'password'},
+    )
+    new_password = serializers.CharField(
+        write_only=True,
+        required=True,
+        style={'input_type': 'password'},
+        validators=[validate_password],
+    )
+    confirm_password = serializers.CharField(
+        write_only=True,
+        required=True,
+        style={'input_type': 'password'},
+    )
+
+    def validate_current_password(self, value):
+        # Trim whitespace from password input
+        value = value.strip() if value else value
+        user = self.context['request'].user
+        # Refresh user from database to ensure we have the latest password hash
+        user = User.objects.get(pk=user.pk)
+        if not user.check_password(value):
+            raise serializers.ValidationError('Current password is incorrect.')
+        return value
+
+    def validate(self, attrs):
+        new_password = attrs.get('new_password')
+        confirm_password = attrs.get('confirm_password')
+        
+        if new_password != confirm_password:
+            raise serializers.ValidationError({'confirm_password': 'New passwords do not match.'})
+        
+        return attrs
+
+    def save(self):
+        user = self.context['request'].user
+        # Refresh user from database to ensure we have the latest user instance
+        user = User.objects.get(pk=user.pk)
+        new_password = self.validated_data['new_password']
+        user.set_password(new_password)
+        user.save(update_fields=['password'])
+        return user
 
 
 class UserProfileListSerializer(serializers.ModelSerializer):
