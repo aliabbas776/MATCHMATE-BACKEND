@@ -15,6 +15,7 @@ from django.core.files.base import ContentFile
 from django.utils import timezone
 from django.db.models import F
 from django.db import transaction
+from django.conf import settings
 
 from .models import CNICVerification, MatchPreference, SubscriptionPlan, UserProfile, UserProfileImage, UserReport, UserSubscription
 
@@ -96,13 +97,13 @@ def check_and_reenable_profile_if_needed(reported_user):
     # Count remaining pending reports
     pending_count = UserReport.objects.filter(
         reported_user=reported_user,
-        status='pending'
+        status=settings.REPORT_STATUS_PENDING
     ).aggregate(
         distinct_count=Count('reporter', distinct=True)
     )['distinct_count']
     
-    # If pending reports drop below 5, re-enable the profile
-    if pending_count < 5:
+    # If pending reports drop below threshold, re-enable the profile
+    if pending_count < settings.REPORT_DISABLE_THRESHOLD:
         try:
             profile = UserProfile.objects.get(user=reported_user)
             if profile.is_disabled:
@@ -133,12 +134,12 @@ def check_and_disable_profile_if_needed(reported_user):
     # Count distinct reporters (users who have reported this user) - more reliable method
     distinct_reporters_count = UserReport.objects.filter(
         reported_user=reported_user,
-        status='pending'
+        status=settings.REPORT_STATUS_PENDING
     ).aggregate(
         distinct_count=Count('reporter', distinct=True)
     )['distinct_count']
     
-    if distinct_reporters_count >= 5:
+    if distinct_reporters_count >= settings.REPORT_DISABLE_THRESHOLD:
         try:
             profile = UserProfile.objects.get(user=reported_user)
             if not profile.is_disabled:
@@ -260,6 +261,7 @@ class RegistrationView(APIView):
                 'profile_picture': request.build_absolute_uri(user.profile.profile_picture.url)
                 if hasattr(user, 'profile') and user.profile.profile_picture
                 else None,
+                'birth_country': user.profile.birth_country if hasattr(user, 'profile') else None,
             }
             return Response(data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -288,13 +290,13 @@ class LoginView(APIView):
         from django.db.models import Count
         pending_count = UserReport.objects.filter(
             reported_user=user,
-            status='pending'
+            status=settings.REPORT_STATUS_PENDING
         ).aggregate(
             distinct_count=Count('reporter', distinct=True)
         )['distinct_count']
         
-        # If user has 5+ pending reports, disable the profile
-        if pending_count >= 5:
+        # If user has threshold+ pending reports, disable the profile
+        if pending_count >= settings.REPORT_DISABLE_THRESHOLD:
             check_and_disable_profile_if_needed(user)
         
         # Check if user's profile is disabled
@@ -971,28 +973,76 @@ class ChangePasswordView(APIView):
 
 class UserAccountDeleteView(APIView):
     """
-    Authenticated endpoint for deleting user account.
+    Authenticated endpoint for deleting user account and all associated data.
+    
+    This will delete:
+    - User account
+    - User profile and profile images
+    - Match preferences
+    - CNIC verification
+    - User connections
+    - Messages
+    - Sessions and session tokens
+    - User reports (both as reporter and reported user)
+    - User subscription
+    - Password reset OTPs
+    
+    All related data will be automatically deleted due to CASCADE relationships.
     """
 
     authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated]
 
     def delete(self, request):
-        """Delete user account and associated profile."""
+        """Delete user account and all associated data."""
+        return self._delete_account(request)
+    
+    def post(self, request):
+        """Delete user account and all associated data (POST method support)."""
+        return self._delete_account(request)
+    
+    def _delete_account(self, request):
+        """Internal method to handle account deletion."""
         user = request.user
-        # Delete profile if it exists
-        try:
-            profile = UserProfile.objects.get(user=user)
-            profile.delete()
-        except UserProfile.DoesNotExist:
-            pass
+        user_id = user.id
+        username = user.username
+        email = user.email
         
-        # Delete user account
-        user.delete()
-        return Response(
-            {'detail': 'User account deleted successfully.'},
-            status=status.HTTP_200_OK,
-        )
+        try:
+            # Use transaction to ensure atomicity
+            with transaction.atomic():
+                # Delete user account - this will cascade delete:
+                # - UserProfile (OneToOne with CASCADE)
+                # - UserProfileImage (ForeignKey with CASCADE)
+                # - MatchPreference (OneToOne with CASCADE)
+                # - CNICVerification (OneToOne with CASCADE)
+                # - UserConnection (ForeignKey with CASCADE)
+                # - Message (ForeignKey with CASCADE)
+                # - Session (ForeignKey with CASCADE)
+                # - SessionAuditLog (ForeignKey with CASCADE)
+                # - SessionJoinToken (ForeignKey with CASCADE)
+                # - UserReport (ForeignKey with CASCADE)
+                # - UserSubscription (OneToOne with CASCADE)
+                # - PasswordResetOTP (ForeignKey with CASCADE)
+                user.delete()
+            
+            return Response(
+                {
+                    'detail': 'User account and all associated data deleted successfully.',
+                    'deleted_user_id': user_id,
+                    'deleted_username': username,
+                    'deleted_email': email,
+                },
+                status=status.HTTP_200_OK,
+            )
+        except Exception as e:
+            return Response(
+                {
+                    'detail': 'An error occurred while deleting the account.',
+                    'error': str(e),
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
 
 class StandardResultsSetPagination(PageNumberPagination):
@@ -1285,7 +1335,7 @@ class UserReportView(APIView):
         # Get report statistics
         report_info = UserReport.objects.filter(
             reported_user=reported_user,
-            status='pending'
+            status=settings.REPORT_STATUS_PENDING
         ).aggregate(
             total_reports=Count('id'),
             distinct_reporters=Count('reporter', distinct=True)
@@ -1294,7 +1344,7 @@ class UserReportView(APIView):
         # Get list of distinct reporters
         distinct_reporters = UserReport.objects.filter(
             reported_user=reported_user,
-            status='pending'
+            status=settings.REPORT_STATUS_PENDING
         ).values('reporter__id', 'reporter__username', 'reporter__email').distinct()
         
         try:
@@ -1308,7 +1358,7 @@ class UserReportView(APIView):
             profile_status = None
         
         # Check if profile should be disabled or re-enabled (manual trigger)
-        should_disable = report_info['distinct_reporters'] >= 5
+        should_disable = report_info['distinct_reporters'] >= settings.REPORT_DISABLE_THRESHOLD
         
         # If should be disabled but isn't, disable it
         if should_disable and profile_status and not profile_status['is_disabled']:
@@ -1378,7 +1428,7 @@ class UserReportView(APIView):
         from django.db.models import Count
         report_count_info = UserReport.objects.filter(
             reported_user=report.reported_user,
-            status='pending'
+            status=settings.REPORT_STATUS_PENDING
         ).aggregate(
             total_reports=Count('id'),
             distinct_reporters=Count('reporter', distinct=True)

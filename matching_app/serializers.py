@@ -40,6 +40,13 @@ class RegistrationSerializer(serializers.ModelSerializer):
     email = serializers.EmailField(required=True)
     phone_number = serializers.CharField(required=True, write_only=True)
     profile_picture = serializers.ImageField(required=False, allow_null=True, write_only=True)
+    birth_country = serializers.ChoiceField(
+        choices=models.Country.choices,
+        required=False,
+        allow_blank=True,
+        write_only=True,
+        help_text='Country where the user was born'
+    )
     password = serializers.CharField(
         write_only=True,
         required=True,
@@ -62,6 +69,7 @@ class RegistrationSerializer(serializers.ModelSerializer):
             'email',
             'phone_number',
             'profile_picture',
+            'birth_country',
             'password',
             'confirm_password',
         ]
@@ -94,6 +102,7 @@ class RegistrationSerializer(serializers.ModelSerializer):
         validated_data.pop('confirm_password')
         phone_number = validated_data.pop('phone_number')
         profile_picture = validated_data.pop('profile_picture', None)
+        birth_country = validated_data.pop('birth_country', None)
         password = validated_data.pop('password')
         
         # Ensure password is trimmed (should already be from validate, but double-check)
@@ -104,6 +113,7 @@ class RegistrationSerializer(serializers.ModelSerializer):
             user=user,
             phone_number=phone_number,
             profile_picture=profile_picture,
+            birth_country=birth_country,
         )
         return user
 
@@ -326,6 +336,7 @@ class UserProfileSectionSerializer(serializers.ModelSerializer):
                     'email',
                     'hidden_name',
                     'date_of_birth',
+                    'birth_country',
                     'country',
                     'city',
                     'religion',
@@ -366,6 +377,9 @@ class UserProfileSectionSerializer(serializers.ModelSerializer):
                 'education_employment',
                 [
                     'education_level',
+                    'institute_name',
+                    'degree_title',
+                    'duration',
                     'employment_status',
                     'profession',
                 ],
@@ -399,6 +413,7 @@ class UserProfileSectionSerializer(serializers.ModelSerializer):
             'email',
             'hidden_name',
             'date_of_birth',
+            'birth_country',
             'country',
             'city',
             'religion',
@@ -418,6 +433,9 @@ class UserProfileSectionSerializer(serializers.ModelSerializer):
             'total_brothers',
             'total_sisters',
             'education_level',
+            'institute_name',
+            'degree_title',
+            'duration',
             'employment_status',
             'profession',
             'profile_picture',
@@ -1911,7 +1929,7 @@ class UserReportSerializer(serializers.Serializer):
         existing_report = UserReport.objects.filter(
             reporter=request_user,
             reported_user=reported_user,
-            status='pending'
+            status=settings.REPORT_STATUS_PENDING
         ).exists()
         
         if existing_report:
@@ -1933,5 +1951,5 @@ class UserReportSerializer(serializers.Serializer):
             reported_user=reported_user,
             reason=reason,
             description=description,
-            status='pending',
+            status=settings.REPORT_STATUS_PENDING,
         )

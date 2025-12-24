@@ -125,6 +125,7 @@ class UserProfile(models.Model):
     candidate_name = models.CharField(max_length=255, blank=True)
     hidden_name = models.BooleanField(default=False)
     date_of_birth = models.DateField(blank=True, null=True)
+    birth_country = models.CharField(max_length=100, choices=Country.choices, blank=True, help_text='Country where the user was born')
     country = models.CharField(max_length=100, choices=Country.choices, blank=True)
     city = models.CharField(max_length=100, choices=City.choices, blank=True)
     religion = models.CharField(max_length=100, choices=Religion.choices, blank=True)
@@ -136,6 +137,10 @@ class UserProfile(models.Model):
     gender = models.CharField(max_length=10, choices=Gender.choices, blank=True)
     marital_status = models.CharField(max_length=15, choices=MaritalStatus.choices, blank=True)
     education_level = models.CharField(max_length=120, choices=EducationLevel.choices, blank=True)
+    # Education Details
+    institute_name = models.CharField(max_length=255, blank=True, help_text='Name of the educational institute')
+    degree_title = models.CharField(max_length=255, blank=True, help_text='Title of the degree obtained')
+    duration = models.CharField(max_length=100, blank=True, help_text='Duration of education (e.g., "2018-2022" or "4 years")')
     employment_status = models.CharField(
         max_length=30,
         choices=EmploymentStatus.choices,

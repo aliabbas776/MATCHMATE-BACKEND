@@ -38,6 +38,7 @@ ALLOWED_HOSTS = [
     '0.0.0.0',
     'DESKTOP-824PRP9',
     'desktop-824prp9',
+    '192.168.18.71:5175'
 ]
 
 
@@ -182,3 +183,9 @@ ZOOM_CLIENT_ID = os.getenv('ZOOM_CLIENT_ID')
 ZOOM_CLIENT_SECRET = os.getenv('ZOOM_CLIENT_SECRET')
 ZOOM_BASE_URL = 'https://api.zoom.us/v2'
 ZOOM_OAUTH_URL = 'https://zoom.us/oauth/token'
+
+# Report System Configuration
+REPORT_DISABLE_THRESHOLD = int(os.getenv('REPORT_DISABLE_THRESHOLD', '5'))  # Number of distinct reports needed to disable profile
+REPORT_STATUS_PENDING = 'pending'
+REPORT_STATUS_REVIEWED = 'reviewed'
+REPORT_STATUS_DISMISSED = 'dismissed'
