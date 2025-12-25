@@ -547,15 +547,21 @@ class UserProfileSectionSerializer(serializers.ModelSerializer):
         images_data = rep.pop('images', [])
 
         sectioned = OrderedDict()
+        # Education fields that must always be included
+        education_fields = ['institute_name', 'degree_title', 'duration']
+        
         for section, fields in self.section_field_map.items():
             section_data = {}
             for field in fields:
-                # Get field value from rep if available, otherwise get from instance
-                if field in rep:
+                # For education fields, always get from instance to ensure they're included
+                if field in education_fields:
+                    section_data[field] = getattr(instance, field, None) or ''
+                elif field in rep:
                     section_data[field] = rep.pop(field)
                 else:
-                    # Get directly from instance to ensure field is included even if empty
-                    section_data[field] = getattr(instance, field, None)
+                    # Get directly from instance for other fields too
+                    field_value = getattr(instance, field, None)
+                    section_data[field] = field_value
             sectioned[section] = section_data
         
         # Add images to the images section
