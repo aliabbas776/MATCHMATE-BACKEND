@@ -548,7 +548,15 @@ class UserProfileSectionSerializer(serializers.ModelSerializer):
 
         sectioned = OrderedDict()
         for section, fields in self.section_field_map.items():
-            sectioned[section] = {field: rep.pop(field, None) for field in fields}
+            section_data = {}
+            for field in fields:
+                # Get field value from rep if available, otherwise get from instance
+                if field in rep:
+                    section_data[field] = rep.pop(field)
+                else:
+                    # Get directly from instance to ensure field is included even if empty
+                    section_data[field] = getattr(instance, field, None)
+            sectioned[section] = section_data
         
         # Add images to the images section
         sectioned['images'] = images_data
