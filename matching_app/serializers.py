@@ -547,7 +547,7 @@ class UserProfileSectionSerializer(serializers.ModelSerializer):
         images_data = rep.pop('images', [])
 
         sectioned = OrderedDict()
-        # Education fields that must always be included
+        # Education fields that must always be included (even if empty)
         education_fields = ['institute_name', 'degree_title', 'duration']
         
         for section, fields in self.section_field_map.items():
@@ -555,7 +555,9 @@ class UserProfileSectionSerializer(serializers.ModelSerializer):
             for field in fields:
                 # For education fields, always get from instance to ensure they're included
                 if field in education_fields:
-                    section_data[field] = getattr(instance, field, None) or ''
+                    # Always get from instance, default to empty string if None
+                    value = getattr(instance, field, None)
+                    section_data[field] = value if value is not None else ''
                 elif field in rep:
                     section_data[field] = rep.pop(field)
                 else:
