@@ -475,7 +475,7 @@ class UserConnection(models.Model):
                 name='unique_connection_request',
             ),
             models.CheckConstraint(
-                check=~Q(from_user=F('to_user')),
+                condition=~Q(from_user=F('to_user')),
                 name='prevent_self_connection',
             ),
         ]
@@ -564,7 +564,7 @@ class Session(models.Model):
         ]
         constraints = [
             models.CheckConstraint(
-                check=~Q(initiator=F('participant')),
+                condition=~Q(initiator=F('participant')),
                 name='prevent_self_session',
             ),
         ]
@@ -752,7 +752,7 @@ class UserReport(models.Model):
         ]
         constraints = [
             models.CheckConstraint(
-                check=~Q(reporter=F('reported_user')),
+                condition=~Q(reporter=F('reported_user')),
                 name='prevent_self_report',
             ),
         ]

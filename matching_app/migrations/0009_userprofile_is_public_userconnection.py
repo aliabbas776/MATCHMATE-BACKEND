@@ -30,7 +30,7 @@ class Migration(migrations.Migration):
             ],
             options={
                 'ordering': ['-updated_at'],
-                'constraints': [models.UniqueConstraint(fields=('from_user', 'to_user'), name='unique_connection_request'), models.CheckConstraint(check=models.Q(('from_user', models.F('to_user')), _negated=True), name='prevent_self_connection')],
+                'constraints': [models.UniqueConstraint(fields=('from_user', 'to_user'), name='unique_connection_request'), models.CheckConstraint(condition=models.Q(('from_user', models.F('to_user')), _negated=True), name='prevent_self_connection')],
             },
         ),
     ]
