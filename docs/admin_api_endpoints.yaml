@@ -1,0 +1,2118 @@
+openapi: 3.0.0
+info:
+  title: MatchMate Admin API
+  description: REST API endpoints for admin panel frontend integration
+  version: 1.0.0
+  contact:
+    name: MatchMate Admin API
+
+servers:
+  - url: http://localhost:8000/api/admin
+    description: Local development server
+  - url: https://api.matchmate.com/api/admin
+    description: Production server
+
+tags:
+  - name: Authentication
+    description: Admin authentication endpoints
+  - name: Users
+    description: User management
+  - name: Profiles
+    description: User profile management
+  - name: Reports
+    description: User reports management
+  - name: CNIC Verifications
+    description: CNIC verification management
+  - name: Connections
+    description: User connections management
+  - name: Messages
+    description: Messages management
+  - name: Sessions
+    description: Video sessions management
+  - name: Subscriptions
+    description: Subscription plans and user subscriptions
+  - name: Match Preferences
+    description: User match preferences
+  - name: Dashboard
+    description: Admin dashboard statistics
+
+security:
+  - bearerAuth: []
+
+paths:
+  # ========================================
+  # DASHBOARD / STATISTICS
+  # ========================================
+  /dashboard/stats:
+    get:
+      tags:
+        - Dashboard
+      summary: Get dashboard statistics
+      description: Get overall statistics for admin dashboard
+      responses:
+        '200':
+          description: Dashboard statistics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total_users:
+                    type: integer
+                  active_users:
+                    type: integer
+                  disabled_users:
+                    type: integer
+                  total_profiles:
+                    type: integer
+                  pending_reports:
+                    type: integer
+                  reviewed_reports:
+                    type: integer
+                  dismissed_reports:
+                    type: integer
+                  pending_cnic_verifications:
+                    type: integer
+                  verified_cnic_verifications:
+                    type: integer
+                  rejected_cnic_verifications:
+                    type: integer
+                  total_connections:
+                    type: integer
+                  total_messages:
+                    type: integer
+                  total_sessions:
+                    type: integer
+                  subscription_stats:
+                    type: object
+                    properties:
+                      total_subscriptions:
+                        type: integer
+                      free_plan:
+                        type: integer
+                      premium_plan:
+                        type: integer
+                      vip_plan:
+                        type: integer
+
+  # ========================================
+  # USERS MANAGEMENT
+  # ========================================
+  /users:
+    get:
+      tags:
+        - Users
+      summary: List all users
+      description: Get paginated list of all users with filtering and search
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: search
+          in: query
+          description: Search by username, email, first_name, last_name
+          schema:
+            type: string
+        - name: is_active
+          in: query
+          schema:
+            type: boolean
+        - name: is_staff
+          in: query
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: List of users
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count:
+                    type: integer
+                  next:
+                    type: string
+                    nullable: true
+                  previous:
+                    type: string
+                    nullable: true
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/User'
+
+    post:
+      tags:
+        - Users
+      summary: Create a new user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - username
+                - email
+                - password
+              properties:
+                username:
+                  type: string
+                email:
+                  type: string
+                first_name:
+                  type: string
+                last_name:
+                  type: string
+                password:
+                  type: string
+                is_staff:
+                  type: boolean
+                  default: false
+                is_active:
+                  type: boolean
+                  default: true
+      responses:
+        '201':
+          description: User created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+
+  /users/{id}:
+    get:
+      tags:
+        - Users
+      summary: Get user details
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: User details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+
+    put:
+      tags:
+        - Users
+      summary: Update user
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                username:
+                  type: string
+                email:
+                  type: string
+                first_name:
+                  type: string
+                last_name:
+                  type: string
+                is_staff:
+                  type: boolean
+                is_active:
+                  type: boolean
+      responses:
+        '200':
+          description: User updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+
+    patch:
+      tags:
+        - Users
+      summary: Partially update user
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                is_active:
+                  type: boolean
+                is_staff:
+                  type: boolean
+      responses:
+        '200':
+          description: User updated
+
+    delete:
+      tags:
+        - Users
+      summary: Delete/deactivate user
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '204':
+          description: User deactivated
+
+  /users/{id}/activate:
+    post:
+      tags:
+        - Users
+      summary: Activate user
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: User activated
+
+  /users/{id}/deactivate:
+    post:
+      tags:
+        - Users
+      summary: Deactivate user
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: User deactivated
+
+  # ========================================
+  # USER PROFILES MANAGEMENT
+  # ========================================
+  /profiles:
+    get:
+      tags:
+        - Profiles
+      summary: List all user profiles
+      description: Get paginated list of profiles with filtering and search
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: search
+          in: query
+          description: Search by username, email, candidate_name, city, phone_number
+          schema:
+            type: string
+        - name: gender
+          in: query
+          schema:
+            type: string
+            enum: [Male, Female, Other]
+        - name: marital_status
+          in: query
+          schema:
+            type: string
+        - name: country
+          in: query
+          schema:
+            type: string
+        - name: city
+          in: query
+          schema:
+            type: string
+        - name: is_disabled
+          in: query
+          schema:
+            type: boolean
+        - name: is_public
+          in: query
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: List of profiles
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count:
+                    type: integer
+                  next:
+                    type: string
+                    nullable: true
+                  previous:
+                    type: string
+                    nullable: true
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/UserProfile'
+
+  /profiles/{id}:
+    get:
+      tags:
+        - Profiles
+      summary: Get profile details
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Profile details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+
+    put:
+      tags:
+        - Profiles
+      summary: Update profile
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserProfileUpdate'
+      responses:
+        '200':
+          description: Profile updated
+
+    patch:
+      tags:
+        - Profiles
+      summary: Partially update profile
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserProfileUpdate'
+      responses:
+        '200':
+          description: Profile updated
+
+    delete:
+      tags:
+        - Profiles
+      summary: Delete profile
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '204':
+          description: Profile deleted
+
+  /profiles/{id}/disable:
+    post:
+      tags:
+        - Profiles
+      summary: Disable profile
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                disabled_reason:
+                  type: string
+      responses:
+        '200':
+          description: Profile disabled
+
+  /profiles/{id}/enable:
+    post:
+      tags:
+        - Profiles
+      summary: Enable profile
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Profile enabled
+
+  # ========================================
+  # USER REPORTS MANAGEMENT
+  # ========================================
+  /reports:
+    get:
+      tags:
+        - Reports
+      summary: List all reports
+      description: Get paginated list of reports with filtering and search
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: search
+          in: query
+          description: Search by reporter/reported user username/email or description
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, reviewed, dismissed]
+        - name: reason
+          in: query
+          schema:
+            type: string
+            enum: [inappropriate_content, fake_profile, harassment, spam, scam, other]
+      responses:
+        '200':
+          description: List of reports
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count:
+                    type: integer
+                  next:
+                    type: string
+                    nullable: true
+                  previous:
+                    type: string
+                    nullable: true
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/UserReport'
+
+  /reports/{id}:
+    get:
+      tags:
+        - Reports
+      summary: Get report details
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Report details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserReport'
+
+    patch:
+      tags:
+        - Reports
+      summary: Update report status
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status:
+                  type: string
+                  enum: [pending, reviewed, dismissed]
+      responses:
+        '200':
+          description: Report updated
+
+  /reports/{id}/review:
+    post:
+      tags:
+        - Reports
+      summary: Mark report as reviewed
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Report marked as reviewed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  re_enabled_count:
+                    type: integer
+                    description: Number of profiles re-enabled if pending reports dropped below 5
+
+  /reports/{id}/dismiss:
+    post:
+      tags:
+        - Reports
+      summary: Mark report as dismissed
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Report marked as dismissed
+
+  /reports/{id}/reopen:
+    post:
+      tags:
+        - Reports
+      summary: Mark report as pending (re-open)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Report marked as pending
+
+  /reports/bulk-review:
+    post:
+      tags:
+        - Reports
+      summary: Bulk mark reports as reviewed
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - report_ids
+              properties:
+                report_ids:
+                  type: array
+                  items:
+                    type: integer
+      responses:
+        '200':
+          description: Reports marked as reviewed
+
+  /reports/bulk-dismiss:
+    post:
+      tags:
+        - Reports
+      summary: Bulk mark reports as dismissed
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - report_ids
+              properties:
+                report_ids:
+                  type: array
+                  items:
+                    type: integer
+      responses:
+        '200':
+          description: Reports marked as dismissed
+
+  # ========================================
+  # CNIC VERIFICATIONS MANAGEMENT
+  # ========================================
+  /cnic-verifications:
+    get:
+      tags:
+        - CNIC Verifications
+      summary: List all CNIC verifications
+      description: Get paginated list of CNIC verifications with filtering and search
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: search
+          in: query
+          description: Search by username, email, extracted_full_name, extracted_cnic
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, verified, rejected]
+        - name: tampering_detected
+          in: query
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: List of CNIC verifications
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count:
+                    type: integer
+                  next:
+                    type: string
+                    nullable: true
+                  previous:
+                    type: string
+                    nullable: true
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CNICVerification'
+
+  /cnic-verifications/{id}:
+    get:
+      tags:
+        - CNIC Verifications
+      summary: Get CNIC verification details
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: CNIC verification details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CNICVerification'
+
+    patch:
+      tags:
+        - CNIC Verifications
+      summary: Update CNIC verification
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status:
+                  type: string
+                  enum: [pending, verified, rejected]
+                rejection_reason:
+                  type: string
+      responses:
+        '200':
+          description: CNIC verification updated
+
+  /cnic-verifications/{id}/verify:
+    post:
+      tags:
+        - CNIC Verifications
+      summary: Approve CNIC verification
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: CNIC verification approved
+
+  /cnic-verifications/{id}/reject:
+    post:
+      tags:
+        - CNIC Verifications
+      summary: Reject CNIC verification
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                rejection_reason:
+                  type: string
+      responses:
+        '200':
+          description: CNIC verification rejected
+
+  /cnic-verifications/{id}/sync-profile:
+    post:
+      tags:
+        - CNIC Verifications
+      summary: Sync verification status to user profile
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Status synced to profile
+
+  /cnic-verifications/bulk-sync:
+    post:
+      tags:
+        - CNIC Verifications
+      summary: Bulk sync verification status to profiles
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - verification_ids
+              properties:
+                verification_ids:
+                  type: array
+                  items:
+                    type: integer
+      responses:
+        '200':
+          description: Verifications synced
+
+  # ========================================
+  # USER CONNECTIONS MANAGEMENT
+  # ========================================
+  /connections:
+    get:
+      tags:
+        - Connections
+      summary: List all connections
+      description: Get paginated list of user connections with filtering and search
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: search
+          in: query
+          description: Search by from_user or to_user username/email
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, accepted, rejected, cancelled]
+      responses:
+        '200':
+          description: List of connections
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count:
+                    type: integer
+                  next:
+                    type: string
+                    nullable: true
+                  previous:
+                    type: string
+                    nullable: true
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/UserConnection'
+
+  /connections/{id}:
+    get:
+      tags:
+        - Connections
+      summary: Get connection details
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Connection details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserConnection'
+
+    delete:
+      tags:
+        - Connections
+      summary: Delete connection
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '204':
+          description: Connection deleted
+
+  # ========================================
+  # MESSAGES MANAGEMENT
+  # ========================================
+  /messages:
+    get:
+      tags:
+        - Messages
+      summary: List all messages
+      description: Get paginated list of messages with filtering and search
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: search
+          in: query
+          description: Search by sender/receiver username or message content
+          schema:
+            type: string
+        - name: is_read
+          in: query
+          schema:
+            type: boolean
+        - name: created_at_after
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: created_at_before
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: List of messages
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count:
+                    type: integer
+                  next:
+                    type: string
+                    nullable: true
+                  previous:
+                    type: string
+                    nullable: true
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Message'
+
+  /messages/{id}:
+    get:
+      tags:
+        - Messages
+      summary: Get message details
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Message details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Message'
+
+    delete:
+      tags:
+        - Messages
+      summary: Delete message
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '204':
+          description: Message deleted
+
+  # ========================================
+  # SESSIONS MANAGEMENT
+  # ========================================
+  /sessions:
+    get:
+      tags:
+        - Sessions
+      summary: List all sessions
+      description: Get paginated list of video sessions with filtering and search
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: search
+          in: query
+          description: Search by initiator/participant username/email or zoom_meeting_id
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, active, ended, cancelled]
+        - name: initiator_ready
+          in: query
+          schema:
+            type: boolean
+        - name: participant_ready
+          in: query
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: List of sessions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count:
+                    type: integer
+                  next:
+                    type: string
+                    nullable: true
+                  previous:
+                    type: string
+                    nullable: true
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Session'
+
+  /sessions/{id}:
+    get:
+      tags:
+        - Sessions
+      summary: Get session details
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Session details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+
+    delete:
+      tags:
+        - Sessions
+      summary: Delete/cancel session
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '204':
+          description: Session deleted
+
+  /sessions/{id}/audit-logs:
+    get:
+      tags:
+        - Sessions
+      summary: Get session audit logs
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Session audit logs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SessionAuditLog'
+
+  /session-tokens:
+    get:
+      tags:
+        - Sessions
+      summary: List all session join tokens
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: is_used
+          in: query
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: List of session tokens
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count:
+                    type: integer
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SessionJoinToken'
+
+  /session-tokens/{id}:
+    get:
+      tags:
+        - Sessions
+      summary: Get session token details
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Session token details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionJoinToken'
+
+  # ========================================
+  # SUBSCRIPTION PLANS MANAGEMENT
+  # ========================================
+  /subscription-plans:
+    get:
+      tags:
+        - Subscriptions
+      summary: List all subscription plans
+      parameters:
+        - name: is_active
+          in: query
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: List of subscription plans
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SubscriptionPlan'
+
+    post:
+      tags:
+        - Subscriptions
+      summary: Create subscription plan
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubscriptionPlanCreate'
+      responses:
+        '201':
+          description: Subscription plan created
+
+  /subscription-plans/{id}:
+    get:
+      tags:
+        - Subscriptions
+      summary: Get subscription plan details
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Subscription plan details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubscriptionPlan'
+
+    put:
+      tags:
+        - Subscriptions
+      summary: Update subscription plan
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubscriptionPlanUpdate'
+      responses:
+        '200':
+          description: Subscription plan updated
+
+    patch:
+      tags:
+        - Subscriptions
+      summary: Partially update subscription plan
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubscriptionPlanUpdate'
+      responses:
+        '200':
+          description: Subscription plan updated
+
+    delete:
+      tags:
+        - Subscriptions
+      summary: Delete subscription plan
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '204':
+          description: Subscription plan deleted
+
+  # ========================================
+  # USER SUBSCRIPTIONS MANAGEMENT
+  # ========================================
+  /user-subscriptions:
+    get:
+      tags:
+        - Subscriptions
+      summary: List all user subscriptions
+      description: Get paginated list of user subscriptions with filtering and search
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: search
+          in: query
+          description: Search by user username/email
+          schema:
+            type: string
+        - name: plan
+          in: query
+          schema:
+            type: integer
+        - name: status
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of user subscriptions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count:
+                    type: integer
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/UserSubscription'
+
+  /user-subscriptions/{id}:
+    get:
+      tags:
+        - Subscriptions
+      summary: Get user subscription details
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: User subscription details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserSubscription'
+
+    patch:
+      tags:
+        - Subscriptions
+      summary: Update user subscription
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                plan:
+                  type: integer
+      responses:
+        '200':
+          description: User subscription updated
+
+  /user-subscriptions/{id}/reset-usage:
+    post:
+      tags:
+        - Subscriptions
+      summary: Reset usage counters for subscription
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Usage counters reset
+
+  /user-subscriptions/bulk-reset-usage:
+    post:
+      tags:
+        - Subscriptions
+      summary: Bulk reset usage counters
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - subscription_ids
+              properties:
+                subscription_ids:
+                  type: array
+                  items:
+                    type: integer
+      responses:
+        '200':
+          description: Usage counters reset
+
+  # ========================================
+  # MATCH PREFERENCES MANAGEMENT
+  # ========================================
+  /match-preferences:
+    get:
+      tags:
+        - Match Preferences
+      summary: List all match preferences
+      description: Get paginated list of match preferences
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: search
+          in: query
+          description: Search by user username/email
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of match preferences
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count:
+                    type: integer
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MatchPreference'
+
+  /match-preferences/{id}:
+    get:
+      tags:
+        - Match Preferences
+      summary: Get match preference details
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Match preference details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MatchPreference'
+
+    patch:
+      tags:
+        - Match Preferences
+      summary: Update match preferences
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MatchPreferenceUpdate'
+      responses:
+        '200':
+          description: Match preferences updated
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT token authentication. User must have is_staff=True
+
+  schemas:
+    User:
+      type: object
+      properties:
+        id:
+          type: integer
+        username:
+          type: string
+        email:
+          type: string
+        first_name:
+          type: string
+        last_name:
+          type: string
+        is_active:
+          type: boolean
+        is_staff:
+          type: boolean
+        date_joined:
+          type: string
+          format: date-time
+        last_login:
+          type: string
+          format: date-time
+          nullable: true
+
+    UserProfile:
+      type: object
+      properties:
+        id:
+          type: integer
+        user:
+          type: integer
+          description: User ID
+        user_details:
+          $ref: '#/components/schemas/User'
+        profile_picture:
+          type: string
+          format: uri
+          nullable: true
+        is_public:
+          type: boolean
+        is_disabled:
+          type: boolean
+        disabled_at:
+          type: string
+          format: date-time
+          nullable: true
+        disabled_reason:
+          type: string
+        candidate_name:
+          type: string
+        hidden_name:
+          type: boolean
+        date_of_birth:
+          type: string
+          format: date
+          nullable: true
+        country:
+          type: string
+        city:
+          type: string
+        religion:
+          type: string
+        sect:
+          type: string
+        caste:
+          type: string
+        height_cm:
+          type: number
+          nullable: true
+        weight_kg:
+          type: number
+          nullable: true
+        profile_for:
+          type: string
+        gender:
+          type: string
+        marital_status:
+          type: string
+        education_level:
+          type: string
+        employment_status:
+          type: string
+        profession:
+          type: string
+        phone_country_code:
+          type: string
+        phone_number:
+          type: string
+        father_status:
+          type: string
+        father_employment_status:
+          type: string
+        mother_status:
+          type: string
+        mother_employment_status:
+          type: string
+        total_brothers:
+          type: integer
+        total_sisters:
+          type: integer
+        cnic_verification_status:
+          type: string
+          enum: [unverified, pending, verified, rejected]
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    UserProfileUpdate:
+      type: object
+      properties:
+        is_public:
+          type: boolean
+        is_disabled:
+          type: boolean
+        disabled_reason:
+          type: string
+        candidate_name:
+          type: string
+        gender:
+          type: string
+        marital_status:
+          type: string
+        city:
+          type: string
+        country:
+          type: string
+        religion:
+          type: string
+        caste:
+          type: string
+
+    UserReport:
+      type: object
+      properties:
+        id:
+          type: integer
+        reporter:
+          type: integer
+          description: Reporter user ID
+        reporter_details:
+          $ref: '#/components/schemas/User'
+        reported_user:
+          type: integer
+          description: Reported user ID
+        reported_user_details:
+          $ref: '#/components/schemas/User'
+        reason:
+          type: string
+          enum: [inappropriate_content, fake_profile, harassment, spam, scam, other]
+        description:
+          type: string
+        status:
+          type: string
+          enum: [pending, reviewed, dismissed]
+        reviewed_by:
+          type: integer
+          nullable: true
+        reviewed_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CNICVerification:
+      type: object
+      properties:
+        id:
+          type: integer
+        user:
+          type: integer
+          description: User ID
+        user_details:
+          $ref: '#/components/schemas/User'
+        front_image:
+          type: string
+          format: uri
+        back_image:
+          type: string
+          format: uri
+        status:
+          type: string
+          enum: [pending, verified, rejected]
+        extracted_full_name:
+          type: string
+        extracted_cnic:
+          type: string
+        extracted_dob:
+          type: string
+          format: date
+          nullable: true
+        extracted_gender:
+          type: string
+        rejection_reason:
+          type: string
+        tampering_detected:
+          type: boolean
+        blur_score:
+          type: number
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    UserConnection:
+      type: object
+      properties:
+        id:
+          type: integer
+        from_user:
+          type: integer
+        from_user_details:
+          $ref: '#/components/schemas/User'
+        to_user:
+          type: integer
+        to_user_details:
+          $ref: '#/components/schemas/User'
+        status:
+          type: string
+          enum: [pending, accepted, rejected, cancelled]
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    Message:
+      type: object
+      properties:
+        id:
+          type: integer
+        sender:
+          type: integer
+        sender_details:
+          $ref: '#/components/schemas/User'
+        receiver:
+          type: integer
+        receiver_details:
+          $ref: '#/components/schemas/User'
+        content:
+          type: string
+        is_read:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+
+    Session:
+      type: object
+      properties:
+        id:
+          type: integer
+        initiator:
+          type: integer
+        initiator_details:
+          $ref: '#/components/schemas/User'
+        participant:
+          type: integer
+        participant_details:
+          $ref: '#/components/schemas/User'
+        started_by:
+          type: integer
+          nullable: true
+        status:
+          type: string
+          enum: [pending, active, ended, cancelled]
+        initiator_ready:
+          type: boolean
+        participant_ready:
+          type: boolean
+        zoom_meeting_id:
+          type: string
+          nullable: true
+        zoom_meeting_url:
+          type: string
+          nullable: true
+        zoom_meeting_password:
+          type: string
+          nullable: true
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+        ended_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    SessionJoinToken:
+      type: object
+      properties:
+        id:
+          type: integer
+        session:
+          type: integer
+        user:
+          type: integer
+        token:
+          type: string
+        is_used:
+          type: boolean
+        expires_at:
+          type: string
+          format: date-time
+        used_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    SessionAuditLog:
+      type: object
+      properties:
+        id:
+          type: integer
+        session:
+          type: integer
+        user:
+          type: integer
+        event_type:
+          type: string
+        message:
+          type: string
+        metadata:
+          type: object
+        created_at:
+          type: string
+          format: date-time
+
+    SubscriptionPlan:
+      type: object
+      properties:
+        id:
+          type: integer
+        tier:
+          type: string
+          enum: [FREE, PREMIUM, VIP]
+        name:
+          type: string
+        description:
+          type: string
+        price:
+          type: number
+        duration_days:
+          type: integer
+        is_active:
+          type: boolean
+        max_profile_views:
+          type: integer
+        max_connections:
+          type: integer
+        max_connection_requests:
+          type: integer
+        max_chat_users:
+          type: integer
+        max_sessions:
+          type: integer
+        can_send_messages:
+          type: boolean
+        can_view_photos:
+          type: boolean
+        can_see_who_viewed:
+          type: boolean
+        priority_support:
+          type: boolean
+        advanced_search:
+          type: boolean
+        verified_badge:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    SubscriptionPlanCreate:
+      type: object
+      required:
+        - tier
+        - name
+        - price
+      properties:
+        tier:
+          type: string
+          enum: [FREE, PREMIUM, VIP]
+        name:
+          type: string
+        description:
+          type: string
+        price:
+          type: number
+        duration_days:
+          type: integer
+        is_active:
+          type: boolean
+        max_profile_views:
+          type: integer
+        max_connections:
+          type: integer
+        max_connection_requests:
+          type: integer
+        max_chat_users:
+          type: integer
+        max_sessions:
+          type: integer
+        can_send_messages:
+          type: boolean
+        can_view_photos:
+          type: boolean
+        can_see_who_viewed:
+          type: boolean
+        priority_support:
+          type: boolean
+        advanced_search:
+          type: boolean
+        verified_badge:
+          type: boolean
+
+    SubscriptionPlanUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        price:
+          type: number
+        duration_days:
+          type: integer
+        is_active:
+          type: boolean
+        max_profile_views:
+          type: integer
+        max_connections:
+          type: integer
+        max_connection_requests:
+          type: integer
+        max_chat_users:
+          type: integer
+        max_sessions:
+          type: integer
+        can_send_messages:
+          type: boolean
+        can_view_photos:
+          type: boolean
+        can_see_who_viewed:
+          type: boolean
+        priority_support:
+          type: boolean
+        advanced_search:
+          type: boolean
+        verified_badge:
+          type: boolean
+
+    UserSubscription:
+      type: object
+      properties:
+        id:
+          type: integer
+        user:
+          type: integer
+        user_details:
+          $ref: '#/components/schemas/User'
+        plan:
+          type: integer
+        plan_details:
+          $ref: '#/components/schemas/SubscriptionPlan'
+        status:
+          type: string
+        profile_views_used:
+          type: integer
+        connections_used:
+          type: integer
+        connection_requests_used:
+          type: integer
+        chat_users_count:
+          type: integer
+        sessions_used:
+          type: integer
+        starts_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    MatchPreference:
+      type: object
+      properties:
+        id:
+          type: integer
+        user:
+          type: integer
+        user_details:
+          $ref: '#/components/schemas/User'
+        status:
+          type: string
+        religion:
+          type: string
+        caste:
+          type: string
+        country:
+          type: string
+        city:
+          type: string
+        employment_status:
+          type: string
+        profession:
+          type: string
+        min_age:
+          type: integer
+        max_age:
+          type: integer
+        prefers_disability:
+          type: boolean
+        updated_at:
+          type: string
+          format: date-time
+
+    MatchPreferenceUpdate:
+      type: object
+      properties:
+        status:
+          type: string
+        religion:
+          type: string
+        caste:
+          type: string
+        country:
+          type: string
+        city:
+          type: string
+        employment_status:
+          type: string
+        profession:
+          type: string
+        min_age:
+          type: integer
+        max_age:
+          type: integer
+        prefers_disability:
+          type: boolean
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+        detail:
+          type: string
+        message:
+          type: string
+

@@ -1357,10 +1357,13 @@ class SessionStartSerializer(serializers.Serializer):
         session = self.validated_data['session']
         request_user = self.context['request'].user
         
-        # Generate Zoom meeting
+        # Generate Zoom meeting with initiator as alternative host
+        # This ensures the initiator can join without waiting room
+        initiator_email = session.initiator.email if hasattr(session.initiator, 'email') else None
         meeting_id, join_url, password = create_zoom_meeting(
             topic=f"Session: {session.initiator.username} & {session.participant.username}",
             duration_minutes=60,
+            host_email=initiator_email,
         )
         
         # Update session

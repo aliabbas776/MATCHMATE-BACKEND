@@ -105,6 +105,7 @@ def create_zoom_meeting(
     duration_minutes: int = 60,
     password: Optional[str] = None,
     start_time: Optional[timezone.datetime] = None,
+    host_email: Optional[str] = None,
 ) -> Tuple[str, str, str]:
     """
     Create a Zoom meeting via API.
@@ -114,6 +115,7 @@ def create_zoom_meeting(
         duration_minutes: Meeting duration in minutes
         password: Optional meeting password (auto-generated if None)
         start_time: Optional scheduled start time (None for instant meeting)
+        host_email: Optional email of alternative host (initiator's email)
     
     Returns:
         Tuple of (meeting_id, join_url, password)
@@ -138,8 +140,8 @@ def create_zoom_meeting(
             'duration': duration_minutes,
             'password': meeting_password,
             'settings': {
-                'join_before_host': False,
-                'waiting_room': True,
+                'join_before_host': True,  # Allow joining before host (initiator will be alternative host)
+                'waiting_room': False,  # Disable waiting room so initiator can join directly
                 'participant_video': True,
                 'host_video': True,
                 'mute_upon_entry': False,
@@ -150,6 +152,11 @@ def create_zoom_meeting(
                 'auto_recording': 'none',
             }
         }
+        
+        # Add alternative host if provided (this makes the initiator a co-host)
+        # Note: If alternative host assignment fails, we'll retry without it
+        if host_email:
+            meeting_data['settings']['alternative_hosts'] = host_email
         
         # If start_time is provided, make it a scheduled meeting
         if start_time:
@@ -164,6 +171,24 @@ def create_zoom_meeting(
             json=meeting_data,
             timeout=10
         )
+        
+        # If alternative host assignment fails, retry without it
+        if response.status_code == 400 and host_email:
+            try:
+                error_data = response.json()
+                error_message = error_data.get('message', '')
+                # Check if error is related to alternative host
+                if 'alternative host' in error_message.lower() or 'cannot be selected' in error_message.lower():
+                    # Remove alternative host and retry
+                    meeting_data['settings'].pop('alternative_hosts', None)
+                    response = requests.post(
+                        f'{settings.ZOOM_BASE_URL}/users/me/meetings',
+                        headers=headers,
+                        json=meeting_data,
+                        timeout=10
+                    )
+            except:
+                pass  # If parsing fails, continue with original error
         
         response.raise_for_status()
         meeting = response.json()
