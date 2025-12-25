@@ -79,7 +79,7 @@ class Migration(migrations.Migration):
         ),
         migrations.AddConstraint(
             model_name='session',
-            constraint=models.CheckConstraint(condition=models.Q(('initiator', models.F('participant')), _negated=True), name='prevent_self_session'),
+            constraint=models.CheckConstraint(check=models.Q(('initiator', models.F('participant')), _negated=True), name='prevent_self_session'),
         ),
         migrations.AddIndex(
             model_name='sessionauditlog',
