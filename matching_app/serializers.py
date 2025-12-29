@@ -401,7 +401,7 @@ class UserProfileSectionSerializer(serializers.ModelSerializer):
     )
     profile_picture = serializers.ImageField(required=False, allow_null=True)
     has_disability = serializers.BooleanField(required=False)
-    generated_description = serializers.CharField(read_only=True)
+    generated_description = serializers.CharField(required=False, allow_blank=True)
     email = serializers.EmailField(required=False, write_only=False)
     images = serializers.SerializerMethodField()
 
@@ -447,7 +447,7 @@ class UserProfileSectionSerializer(serializers.ModelSerializer):
             'cnic_verified_at',
             'images',
         ]
-        read_only_fields = ['generated_description', 'cnic_verification_status', 'cnic_verified_at', 'images']
+        read_only_fields = ['cnic_verification_status', 'cnic_verified_at', 'images']
 
     def _as_plain_mapping(self, data):
         if isinstance(data, QueryDict):
@@ -1910,9 +1910,10 @@ class SubscriptionUpgradeSerializer(serializers.Serializer):
 class UserReportSerializer(serializers.Serializer):
     """Serializer for creating user reports."""
     reported_user_id = serializers.IntegerField(required=True)
-    reason = serializers.ChoiceField(
-        choices=UserReport.ReportReason.choices,
+    reason = serializers.CharField(
         required=True,
+        max_length=50,
+        help_text='Reason for reporting the user',
     )
     description = serializers.CharField(
         required=False,

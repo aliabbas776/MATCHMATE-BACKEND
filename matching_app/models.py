@@ -716,8 +716,8 @@ class UserReport(models.Model):
     )
     reason = models.CharField(
         max_length=50,
-        choices=ReportReason.choices,
-        default=ReportReason.OTHER,
+        blank=True,
+        help_text='Reason for reporting the user',
     )
     description = models.TextField(
         blank=True,
