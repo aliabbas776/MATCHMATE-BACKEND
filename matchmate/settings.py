@@ -189,3 +189,14 @@ REPORT_DISABLE_THRESHOLD = int(os.getenv('REPORT_DISABLE_THRESHOLD', '5'))  # Nu
 REPORT_STATUS_PENDING = 'pending'
 REPORT_STATUS_REVIEWED = 'reviewed'
 REPORT_STATUS_DISMISSED = 'dismissed'
+
+# Firebase Cloud Messaging (FCM) Configuration
+# Option 1: Path to service account JSON file (recommended for production)
+FIREBASE_SERVICE_ACCOUNT_PATH = os.getenv(
+    'FIREBASE_SERVICE_ACCOUNT_PATH',
+    BASE_DIR / 'match-mate-cb4e2-firebase-adminsdk-fbsvc-38a701b9e7.json'  # Your Firebase service account file
+)
+
+# Option 2: Service account JSON content as string (alternative)
+# You can set FIREBASE_SERVICE_ACCOUNT_JSON in .env file with the JSON content
+# FIREBASE_SERVICE_ACCOUNT_JSON = os.getenv('FIREBASE_SERVICE_ACCOUNT_JSON', None)

@@ -18,6 +18,7 @@ from rest_framework import serializers
 from . import models
 from .models import (
     CNICVerification,
+    Device,
     MatchPreference,
     Message,
     PasswordResetOTP,
@@ -1972,3 +1973,103 @@ class UserReportSerializer(serializers.Serializer):
             description=description,
             status=settings.REPORT_STATUS_PENDING,
         )
+
+
+class DeviceSerializer(serializers.ModelSerializer):
+    """Serializer for Device model (read-only for listing devices)."""
+    
+    class Meta:
+        model = Device
+        fields = [
+            'id',
+            'fcm_token',
+            'device_type',
+            'is_active',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+class DeviceRegisterSerializer(serializers.Serializer):
+    """Serializer for registering or updating an FCM device token."""
+    
+    fcm_token = serializers.CharField(
+        required=True,
+        max_length=255,
+        help_text='Firebase Cloud Messaging token for this device',
+    )
+    device_type = serializers.ChoiceField(
+        choices=Device.DeviceType.choices,
+        required=True,
+        help_text='Type of device (android or ios)',
+    )
+    
+    def validate_fcm_token(self, value):
+        """Validate FCM token format (basic validation)."""
+        if not value or len(value.strip()) == 0:
+            raise serializers.ValidationError('FCM token cannot be empty.')
+        if len(value) < 50:  # FCM tokens are typically much longer
+            raise serializers.ValidationError('Invalid FCM token format.')
+        return value.strip()
+    
+    def create(self, validated_data):
+        """Register or update a device token for the authenticated user."""
+        user = self.context['request'].user
+        fcm_token = validated_data['fcm_token']
+        device_type = validated_data['device_type']
+        
+        # Deactivate any existing device with the same token (for other users)
+        Device.objects.filter(fcm_token=fcm_token).exclude(user=user).update(is_active=False)
+        
+        # Get or create device for this user
+        device, created = Device.objects.get_or_create(
+            user=user,
+            fcm_token=fcm_token,
+            defaults={
+                'device_type': device_type,
+                'is_active': True,
+            }
+        )
+        
+        # If device exists but was inactive, reactivate it and update device_type
+        if not created:
+            device.is_active = True
+            device.device_type = device_type
+            device.save(update_fields=['is_active', 'device_type', 'updated_at'])
+        
+        return device
+
+
+class DeviceDeactivateSerializer(serializers.Serializer):
+    """Serializer for deactivating a device token (logout)."""
+    
+    fcm_token = serializers.CharField(
+        required=True,
+        max_length=255,
+        help_text='Firebase Cloud Messaging token to deactivate',
+    )
+    
+    def validate_fcm_token(self, value):
+        """Validate FCM token format."""
+        if not value or len(value.strip()) == 0:
+            raise serializers.ValidationError('FCM token cannot be empty.')
+        return value.strip()
+    
+    def deactivate(self, validated_data):
+        """Deactivate a device token for the authenticated user."""
+        user = self.context['request'].user
+        fcm_token = validated_data['fcm_token']
+        
+        # Deactivate device if it belongs to this user
+        updated = Device.objects.filter(
+            user=user,
+            fcm_token=fcm_token
+        ).update(is_active=False)
+        
+        if updated == 0:
+            raise serializers.ValidationError(
+                {'fcm_token': 'Device token not found or already deactivated.'}
+            )
+        
+        return {'message': 'Device token deactivated successfully.'}

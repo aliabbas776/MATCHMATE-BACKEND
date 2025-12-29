@@ -17,13 +17,16 @@ from django.db.models import F
 from django.db import transaction
 from django.conf import settings
 
-from .models import CNICVerification, MatchPreference, SubscriptionPlan, UserProfile, UserProfileImage, UserReport, UserSubscription
+from .models import CNICVerification, Device, MatchPreference, SubscriptionPlan, UserProfile, UserProfileImage, UserReport, UserSubscription
 
 from .ocr_utils import analyze_cnic_images
 from .openai_helpers import generate_profile_description, validate_profile_photo
 from .serializers import (
     CNICVerificationSerializer,
     ChangePasswordSerializer,
+    DeviceDeactivateSerializer,
+    DeviceRegisterSerializer,
+    DeviceSerializer,
     LoginSerializer,
     MatchPreferenceSerializer,
     PasswordResetConfirmSerializer,
@@ -1638,4 +1641,100 @@ class SubscriptionCancelView(APIView):
                 'subscription': serializer.data,
             },
             status=status.HTTP_200_OK,
+        )
+
+
+class DeviceRegisterView(APIView):
+    """
+    API endpoint to register or update an FCM device token.
+    
+    POST /api/devices/register/
+    {
+        "fcm_token": "device_fcm_token_here",
+        "device_type": "android" or "ios"
+    }
+    
+    This endpoint:
+    - Registers a new device token for the authenticated user
+    - Updates existing device token if it already exists
+    - Automatically deactivates the same token for other users (if any)
+    """
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        serializer = DeviceRegisterSerializer(
+            data=request.data,
+            context={'request': request}
+        )
+        
+        if serializer.is_valid():
+            device = serializer.save()
+            return Response(
+                {
+                    'message': 'Device registered successfully.',
+                    'device': DeviceSerializer(device).data,
+                },
+                status=status.HTTP_201_CREATED,
+            )
+        
+        return Response(
+            serializer.errors,
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+
+class DeviceListView(APIView):
+    """
+    API endpoint to list all active devices for the authenticated user.
+    
+    GET /api/devices/
+    """
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        devices = Device.objects.filter(
+            user=request.user,
+            is_active=True
+        ).order_by('-created_at')
+        
+        serializer = DeviceSerializer(devices, many=True)
+        return Response(
+            {
+                'devices': serializer.data,
+                'count': len(serializer.data),
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class DeviceDeactivateView(APIView):
+    """
+    API endpoint to deactivate a device token (typically called on logout).
+    
+    POST /api/devices/deactivate/
+    {
+        "fcm_token": "device_fcm_token_here"
+    }
+    """
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        serializer = DeviceDeactivateSerializer(
+            data=request.data,
+            context={'request': request}
+        )
+        
+        if serializer.is_valid():
+            result = serializer.deactivate(serializer.validated_data)
+            return Response(
+                result,
+                status=status.HTTP_200_OK,
+            )
+        
+        return Response(
+            serializer.errors,
+            status=status.HTTP_400_BAD_REQUEST,
         )

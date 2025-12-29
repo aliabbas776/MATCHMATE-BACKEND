@@ -43,12 +43,60 @@ class Country(models.TextChoices):
 
 
 class City(models.TextChoices):
-    LAHORE = 'Lahore', 'Lahore'
     KARACHI = 'Karachi', 'Karachi'
+    LAHORE = 'Lahore', 'Lahore'
     ISLAMABAD = 'Islamabad', 'Islamabad'
+    RAWALPINDI = 'Rawalpindi', 'Rawalpindi'
     FAISALABAD = 'Faisalabad', 'Faisalabad'
     MULTAN = 'Multan', 'Multan'
-    RAWALPINDI = 'Rawalpindi', 'Rawalpindi'
+    GUJRANWALA = 'Gujranwala', 'Gujranwala'
+    SIALKOT = 'Sialkot', 'Sialkot'
+    GUJRAT = 'Gujrat', 'Gujrat'
+    SHEIKHUPURA = 'Sheikhupura', 'Sheikhupura'
+    SARGODHA = 'Sargodha', 'Sargodha'
+    BAHAWALPUR = 'Bahawalpur', 'Bahawalpur'
+    RAHIM_YAR_KHAN = 'Rahim Yar Khan', 'Rahim Yar Khan'
+    DERA_GHAZI_KHAN = 'Dera Ghazi Khan', 'Dera Ghazi Khan'
+    SAHIWAL = 'Sahiwal', 'Sahiwal'
+    OKARA = 'Okara', 'Okara'
+    KASUR = 'Kasur', 'Kasur'
+    JHANG = 'Jhang', 'Jhang'
+
+    HYDERABAD = 'Hyderabad', 'Hyderabad'
+    SUKKUR = 'Sukkur', 'Sukkur'
+    LARKANA = 'Larkana', 'Larkana'
+    NAWABSHAH = 'Nawabshah', 'Nawabshah'
+    MIRPUR_KHAS = 'Mirpur Khas', 'Mirpur Khas'
+    THATTA = 'Thatta', 'Thatta'
+    JACOBABAD = 'Jacobabad', 'Jacobabad'
+
+    PESHAWAR = 'Peshawar', 'Peshawar'
+    MARDAN = 'Mardan', 'Mardan'
+    SWABI = 'Swabi', 'Swabi'
+    ABBOTTABAD = 'Abbottabad', 'Abbottabad'
+    MANSEHRA = 'Mansehra', 'Mansehra'
+    HARIPUR = 'Haripur', 'Haripur'
+    KOHAT = 'Kohat', 'Kohat'
+    DERA_ISMAIL_KHAN = 'Dera Ismail Khan', 'Dera Ismail Khan'
+    NOWSHERA = 'Nowshera', 'Nowshera'
+
+    QUETTA = 'Quetta', 'Quetta'
+    GWADAR = 'Gwadar', 'Gwadar'
+    TURBAT = 'Turbat', 'Turbat'
+    KHUZDAR = 'Khuzdar', 'Khuzdar'
+    ZHOB = 'Zhob', 'Zhob'
+    CHAMAN = 'Chaman', 'Chaman'
+    MASTUNG = 'Mastung', 'Mastung'
+
+    MUZAFFARABAD = 'Muzaffarabad', 'Muzaffarabad'
+    MIRPUR_AJK = 'Mirpur (AJK)', 'Mirpur (AJK)'
+    KOTLI = 'Kotli', 'Kotli'
+
+    GILGIT = 'Gilgit', 'Gilgit'
+    SKARDU = 'Skardu', 'Skardu'
+    HUNZA = 'Hunza', 'Hunza'
+
+    OTHER = 'Other', 'Other'
 
 
 class Religion(models.TextChoices):
@@ -68,11 +116,79 @@ class Sect(models.TextChoices):
 
 
 class Caste(models.TextChoices):
-    SYED = 'Syed', 'Syed'
-    MUGHAL = 'Mughal', 'Mughal'
-    RAJPUT = 'Rajput', 'Rajput'
     ARAIN = 'Arain', 'Arain'
     JATT = 'Jatt', 'Jatt'
+    RAJPUT = 'Rajput', 'Rajput'
+    GUJJAR = 'Gujjar', 'Gujjar'
+    SHEIKH = 'Sheikh', 'Sheikh'
+    SYED = 'Syed', 'Syed'
+    MALIK = 'Malik', 'Malik'
+    AWAN = 'Awan', 'Awan'
+    BHATTI = 'Bhatti', 'Bhatti'
+    CHAUDHRY = 'Chaudhry', 'Chaudhry'
+    WARRAICH = 'Warraich', 'Warraich'
+    GONDAL = 'Gondal', 'Gondal'
+    KHARAL = 'Kharal', 'Kharal'
+    SANDHU = 'Sandhu', 'Sandhu'
+    CHEEMA = 'Cheema', 'Cheema'
+    BAJWA = 'Bajwa', 'Bajwa'
+    VIRK = 'Virk', 'Virk'
+    GILL = 'Gill', 'Gill'
+    MINHAS = 'Minhas', 'Minhas'
+    JANJUA = 'Janjua', 'Janjua'
+    NIAZI = 'Niazi', 'Niazi'
+    QURESHI = 'Qureshi', 'Qureshi'
+    ANSARI = 'Ansari', 'Ansari'
+    FAROOQI = 'Farooqi', 'Farooqi'
+    SIDDIQUI = 'Siddiqui', 'Siddiqui'
+    ABBASI = 'Abbasi', 'Abbasi'
+    BHUTTO = 'Bhutto', 'Bhutto'
+    SHAH = 'Shah', 'Shah'
+    SOOMRO = 'Soomro', 'Soomro'
+    SAMMA = 'Samma', 'Samma'
+    MAHAR = 'Mahar', 'Mahar'
+    JUNEJO = 'Junejo', 'Junejo'
+    PANHWAR = 'Panhwar', 'Panhwar'
+    KALHORO = 'Kalhoro', 'Kalhoro'
+    CHANDIO = 'Chandio', 'Chandio'
+    BROHI = 'Brohi', 'Brohi'
+    SOLANGI = 'Solangi', 'Solangi'
+    MANGRIO = 'Mangrio', 'Mangrio'
+    LASHARI = 'Lashari', 'Lashari'
+    RIND = 'Rind', 'Rind'
+    TALPUR = 'Talpur', 'Talpur'
+    KHOSO = 'Khoso', 'Khoso'
+    MIRANI = 'Mirani', 'Mirani'
+    BUGTI = 'Bugti', 'Bugti'
+    MARRI = 'Marri', 'Marri'
+    MENGAL = 'Mengal', 'Mengal'
+    JAMALI = 'Jamali', 'Jamali'
+    LEGHARI = 'Leghari', 'Leghari'
+    RAISANI = 'Raisani', 'Raisani'
+    KHOSA = 'Khosa', 'Khosa'
+    AFRIDI = 'Afridi', 'Afridi'
+    YOUSAFZAI = 'Yousafzai', 'Yousafzai'
+    KHATTAK = 'Khattak', 'Khattak'
+    BANGASH = 'Bangash', 'Bangash'
+    SHINWARI = 'Shinwari', 'Shinwari'
+    ORAKZAI = 'Orakzai', 'Orakzai'
+    MOHMAND = 'Mohmand', 'Mohmand'
+    WAZIR = 'Wazir', 'Wazir'
+    MEHSUD = 'Mehsud', 'Mehsud'
+    TURI = 'Turi', 'Turi'
+    KAKAR = 'Kakar', 'Kakar'
+    ACHAKZAI = 'Achakzai', 'Achakzai'
+    POPALZAI = 'Popalzai', 'Popalzai'
+    BARAKZAI = 'Barakzai', 'Barakzai'
+    BUTT = 'Butt', 'Butt'
+    DAR = 'Dar', 'Dar'
+    MIR = 'Mir', 'Mir'
+    BHAT = 'Bhat', 'Bhat'
+    LONE = 'Lone', 'Lone'
+    WANI = 'Wani', 'Wani'
+    MAZARI = 'Mazari', 'Mazari'
+    GORCHANI = 'Gorchani', 'Gorchani'
+    QAISRANI = 'Qaisrani', 'Qaisrani'
     OTHER = 'Other', 'Other'
 
 
@@ -1049,4 +1165,50 @@ class UserSubscription(models.Model):
             'chat_users_count',
             'last_reset_at'
         ])
+
+
+class Device(models.Model):
+    """
+    Model to store FCM device tokens for push notifications.
+    Supports multiple devices per user (e.g., phone, tablet).
+    """
+    class DeviceType(models.TextChoices):
+        ANDROID = 'android', 'Android'
+        IOS = 'ios', 'iOS'
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='devices',
+        help_text='User who owns this device',
+    )
+    fcm_token = models.CharField(
+        max_length=255,
+        unique=True,
+        db_index=True,
+        help_text='Firebase Cloud Messaging token for this device',
+    )
+    device_type = models.CharField(
+        max_length=10,
+        choices=DeviceType.choices,
+        help_text='Type of device (Android or iOS)',
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text='Whether this device token is currently active',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['user', 'is_active']),
+            models.Index(fields=['fcm_token', 'is_active']),
+        ]
+        verbose_name = 'Device'
+        verbose_name_plural = 'Devices'
+
+    def __str__(self):
+        return f'Device<{self.user.username}, {self.device_type}, {self.fcm_token[:20]}...>'
 

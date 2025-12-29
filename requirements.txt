@@ -6,4 +6,5 @@ psycopg2-binary
 requests
 openai
 Pillow
+firebase-admin
 

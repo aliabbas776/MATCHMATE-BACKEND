@@ -3,6 +3,9 @@ from django.urls import include, path
 from .views import (
     ChangePasswordView,
     CNICVerificationView,
+    DeviceDeactivateView,
+    DeviceListView,
+    DeviceRegisterView,
     LoginView,
     MatchPreferenceView,
     PasswordResetConfirmView,
@@ -56,5 +59,8 @@ urlpatterns = [
     path('v1/connections/', include('matching_app.urls_connections')),
     path('v1/messages/', include('matching_app.urls_messages')),
     path('v1/sessions/', include('matching_app.urls_sessions')),
+    path('devices/register/', DeviceRegisterView.as_view(), name='device-register'),
+    path('devices/', DeviceListView.as_view(), name='device-list'),
+    path('devices/deactivate/', DeviceDeactivateView.as_view(), name='device-deactivate'),
 ]
 

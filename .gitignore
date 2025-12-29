@@ -52,3 +52,9 @@ Thumbs.db
 # JWT
 *.pem
 
+# Firebase
+firebase-service-account.json
+*-firebase-adminsdk-*.json
+firebase-credentials.json
+match-mate-cb4e2-firebase-adminsdk-*.json
+
