@@ -125,7 +125,7 @@ class UserProfile(models.Model):
     candidate_name = models.CharField(max_length=255, blank=True)
     hidden_name = models.BooleanField(default=False)
     date_of_birth = models.DateField(blank=True, null=True)
-    birth_country = models.CharField(max_length=100, choices=Country.choices, blank=True, help_text='Country where the user was born')
+    birth_country = models.CharField(max_length=100, blank=True, help_text='Country where the user was born')
     country = models.CharField(max_length=100, choices=Country.choices, blank=True)
     city = models.CharField(max_length=100, choices=City.choices, blank=True)
     religion = models.CharField(max_length=100, choices=Religion.choices, blank=True)

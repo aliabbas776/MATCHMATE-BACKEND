@@ -40,8 +40,7 @@ class RegistrationSerializer(serializers.ModelSerializer):
     email = serializers.EmailField(required=True)
     phone_number = serializers.CharField(required=True, write_only=True)
     profile_picture = serializers.ImageField(required=False, allow_null=True, write_only=True)
-    birth_country = serializers.ChoiceField(
-        choices=models.Country.choices,
+    birth_country = serializers.CharField(
         required=False,
         allow_blank=True,
         write_only=True,
