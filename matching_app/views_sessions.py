@@ -145,9 +145,8 @@ class StartSessionView(SessionBaseView):
             
             # Create a message with the Zoom link
             message_content = (
-                f"🎥 Session started! Join the meeting: {session.zoom_meeting_url}\n"
-                f"Meeting ID: {session.zoom_meeting_id}\n"
-                f"Password: {session.zoom_meeting_password}"
+                f"{session.zoom_meeting_url}\n\n"
+                f"If you are ready for this session, please click on this link to join."
             )
             
             Message.objects.create(

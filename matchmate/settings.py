@@ -139,6 +139,12 @@ STATIC_URL = 'static/'
 MEDIA_URL = 'media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
+# File Upload Settings - Remove size restrictions
+# Allow uploads of any size (set to 500MB to effectively remove restriction)
+FILE_UPLOAD_MAX_MEMORY_SIZE = 524288000  # 500 MB in bytes
+DATA_UPLOAD_MAX_MEMORY_SIZE = 524288000  # 500 MB in bytes
+DATA_UPLOAD_MAX_NUMBER_FIELDS = 10000  # Increase field limit
+
 # Default primary key field type
 # https://docs.djangoproject.com/en/4.1/ref/settings/#default-auto-field
 

@@ -81,7 +81,6 @@ class FCMNotificationService:
                 priority=priority,
                 notification=self.messaging.AndroidNotification(
                     sound=sound,
-                    image_url=image_url,
                 ),
             )
             
@@ -107,7 +106,6 @@ class FCMNotificationService:
                     priority=priority,
                     notification=self.messaging.AndroidNotification(
                         sound=sound,
-                        image_url=image_url,
                     ),
                 ),
                 apns=apns_config,
@@ -123,7 +121,7 @@ class FCMNotificationService:
             logger.warning(f"FCM token is unregistered: {fcm_token[:20]}...")
             self._remove_invalid_token(fcm_token)
             return False
-        except self.messaging.InvalidArgumentError as e:
+        except (self.messaging.SenderIdMismatchError, self.messaging.ThirdPartyAuthError) as e:
             logger.error(f"Invalid FCM token or argument: {str(e)}")
             self._remove_invalid_token(fcm_token)
             return False
@@ -240,7 +238,6 @@ class FCMNotificationService:
                     priority=priority,
                     notification=self.messaging.AndroidNotification(
                         sound=sound,
-                        image_url=image_url,
                     ),
                 )
                 
@@ -256,42 +253,66 @@ class FCMNotificationService:
                     ),
                 )
                 
-                # Build multicast message
-                message = self.messaging.MulticastMessage(
-                    tokens=batch_tokens,
-                    notification=notification,
-                    data={k: str(v) for k, v in (data or {}).items()},
-                    android=android_config,
-                    apns=apns_config,
-                )
-                
-                # Send multicast message
-                response = self.messaging.send_multicast(message)
-                
-                # Process results
-                successful_count = response.success_count
-                failed_count = response.failure_count
-                
-                total_successful += successful_count
-                total_failed += failed_count
-                
-                # Check for invalid tokens in failed responses
-                if response.responses:
-                    for idx, resp in enumerate(response.responses):
-                        if not resp.success:
-                            token = batch_tokens[idx]
-                            if isinstance(resp.exception, self.messaging.UnregisteredError):
-                                invalid_tokens.add(token)
-                            elif isinstance(resp.exception, self.messaging.InvalidArgumentError):
-                                invalid_tokens.add(token)
-                
-                logger.info(
-                    f"Multicast batch {i//batch_size + 1}: "
-                    f"{successful_count} successful, {failed_count} failed"
-                )
+                # Try to use multicast if available, otherwise send individually
+                if hasattr(self.messaging, 'send_multicast'):
+                    # Build multicast message
+                    message = self.messaging.MulticastMessage(
+                        tokens=batch_tokens,
+                        notification=notification,
+                        data={k: str(v) for k, v in (data or {}).items()},
+                        android=android_config,
+                        apns=apns_config,
+                    )
+                    
+                    # Send multicast message
+                    response = self.messaging.send_multicast(message)
+                    
+                    # Process results
+                    successful_count = response.success_count
+                    failed_count = response.failure_count
+                    
+                    total_successful += successful_count
+                    total_failed += failed_count
+                    
+                    # Check for invalid tokens in failed responses
+                    if response.responses:
+                        for idx, resp in enumerate(response.responses):
+                            if not resp.success:
+                                token = batch_tokens[idx]
+                                if isinstance(resp.exception, (self.messaging.UnregisteredError, 
+                                                               self.messaging.SenderIdMismatchError,
+                                                               self.messaging.ThirdPartyAuthError)):
+                                    invalid_tokens.add(token)
+                    
+                    logger.info(
+                        f"Multicast batch {i//batch_size + 1}: "
+                        f"{successful_count} successful, {failed_count} failed"
+                    )
+                else:
+                    # Fallback: Send messages individually
+                    logger.info(f"Multicast not available, sending {len(batch_tokens)} messages individually")
+                    for token in batch_tokens:
+                        try:
+                            message = self.messaging.Message(
+                                token=token,
+                                notification=notification,
+                                data={k: str(v) for k, v in (data or {}).items()},
+                                android=android_config,
+                                apns=apns_config,
+                            )
+                            self.messaging.send(message)
+                            total_successful += 1
+                        except (self.messaging.UnregisteredError, 
+                                self.messaging.SenderIdMismatchError,
+                                self.messaging.ThirdPartyAuthError):
+                            invalid_tokens.add(token)
+                            total_failed += 1
+                        except Exception as e:
+                            logger.error(f"Failed to send to device {token[:20]}...: {str(e)}")
+                            total_failed += 1
                 
             except Exception as e:
-                logger.error(f"Failed to send multicast notification batch: {str(e)}")
+                logger.error(f"Failed to send notification batch: {str(e)}")
                 total_failed += len(batch_tokens)
         
         # Remove invalid tokens
@@ -344,7 +365,6 @@ class FCMNotificationService:
                 priority=priority,
                 notification=self.messaging.AndroidNotification(
                     sound=sound,
-                    image_url=image_url,
                 ),
             )
             

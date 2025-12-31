@@ -5,8 +5,11 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.authentication import JWTAuthentication
+import logging
 
 from .models import Message, SubscriptionPlan, UserConnection, UserSubscription
+
+logger = logging.getLogger(__name__)
 
 
 def get_or_create_user_subscription(user):
@@ -137,6 +140,20 @@ class SendMessageView(MessageBaseView):
                 UserSubscription.objects.filter(user=request.user).update(
                     chat_users_count=F('chat_users_count') + 1
                 )
+        
+        # Send push notification to receiver (outside transaction to avoid blocking)
+        try:
+            from .services.notification_examples import send_new_message_notification
+            # Truncate message content for notification preview (first 100 chars)
+            message_preview = message.content[:100] + ('...' if len(message.content) > 100 else '')
+            send_new_message_notification(
+                sender_user=request.user,
+                receiver_user=receiver,
+                message_content=message_preview
+            )
+        except Exception as e:
+            # Log error but don't fail the request if notification fails
+            logger.error(f"Failed to send push notification for message {message.id}: {str(e)}")
         
         response_data = MessageSerializer(message, context={'request': request}).data
         return Response(response_data, status=status.HTTP_201_CREATED)

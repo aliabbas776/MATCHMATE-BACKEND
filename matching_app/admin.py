@@ -2,6 +2,7 @@ from django.contrib import admin
 
 from .models import (
     CNICVerification,
+    Device,
     MatchPreference,
     Message,
     PasswordResetOTP,
@@ -660,6 +661,46 @@ class UserReportAdmin(admin.ModelAdmin):
             message += f' {disabled_count} user profile(s) have been disabled due to 5+ pending reports.'
         self.message_user(request, message)
     mark_as_pending.short_description = 'Mark selected reports as pending (re-open)'
+
+
+@admin.register(Device)
+class DeviceAdmin(admin.ModelAdmin):
+    list_display = (
+        'id',
+        'user',
+        'device_type',
+        'fcm_token_preview',
+        'is_active',
+        'created_at',
+        'updated_at',
+    )
+    list_filter = ('device_type', 'is_active', 'created_at')
+    search_fields = (
+        'user__username',
+        'user__email',
+        'fcm_token',
+    )
+    readonly_fields = ('created_at', 'updated_at')
+    date_hierarchy = 'created_at'
+    
+    fieldsets = (
+        ('Device Information', {
+            'fields': (
+                'user',
+                'fcm_token',
+                'device_type',
+                'is_active',
+            )
+        }),
+        ('Timestamps', {
+            'fields': ('created_at', 'updated_at'),
+            'classes': ('collapse',)
+        }),
+    )
+    
+    def fcm_token_preview(self, obj):
+        return obj.fcm_token[:50] + '...' if len(obj.fcm_token) > 50 else obj.fcm_token
+    fcm_token_preview.short_description = 'FCM Token'
 
 
 @admin.register(SubscriptionPlan)
