@@ -28,13 +28,15 @@ class UserProfileAdmin(admin.ModelAdmin):
         'phone_number',
         'is_public',
         'is_disabled',
+        'admin_verification_status',
         'updated_at',
     )
     search_fields = ('user__username', 'user__email', 'candidate_name', 'city', 'phone_number')
-    list_filter = ('gender', 'marital_status', 'country', 'city', 'is_disabled', 'is_public')
+    list_filter = ('gender', 'marital_status', 'country', 'city', 'is_disabled', 'is_public', 'admin_verification_status')
 
     fieldsets = (
         ('Account', {'fields': ('user', 'profile_picture', 'blur_photo', 'is_public', 'is_disabled', 'disabled_at', 'disabled_reason')}),
+        ('Admin Verification', {'fields': ('admin_verification_status', 'admin_verified_at'), 'description': 'Admin verification status. When set to "Verified", profile completion becomes 100%. Default is "Pending" (95% max).'}),
         (
             'Candidate Information',
             {
@@ -77,7 +79,33 @@ class UserProfileAdmin(admin.ModelAdmin):
         ),
         ('Timestamps', {'fields': ('created_at', 'updated_at'), 'classes': ('collapse',)}),
     )
-    readonly_fields = ('created_at', 'updated_at', 'disabled_at')
+    readonly_fields = ('created_at', 'updated_at', 'disabled_at', 'admin_verified_at')
+    
+    def save_model(self, request, obj, form, change):
+        """Override save_model to set admin_verified_at timestamp when status changes to verified."""
+        from django.utils import timezone
+        
+        if change and obj.pk:
+            try:
+                old_instance = UserProfile.objects.get(pk=obj.pk)
+                old_status = old_instance.admin_verification_status
+                
+                # If status changed to 'verified', set the timestamp
+                if old_status != 'verified' and obj.admin_verification_status == 'verified':
+                    obj.admin_verified_at = timezone.now()
+                # If status changed away from 'verified', clear the timestamp
+                elif old_status == 'verified' and obj.admin_verification_status != 'verified':
+                    obj.admin_verified_at = None
+            except UserProfile.DoesNotExist:
+                # New instance, set timestamp if verified
+                if obj.admin_verification_status == 'verified':
+                    obj.admin_verified_at = timezone.now()
+        else:
+            # New instance, set timestamp if verified
+            if obj.admin_verification_status == 'verified':
+                obj.admin_verified_at = timezone.now()
+        
+        super().save_model(request, obj, form, change)
 
 
 @admin.register(PasswordResetOTP)

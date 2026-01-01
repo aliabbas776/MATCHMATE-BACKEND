@@ -287,6 +287,19 @@ class UserProfile(models.Model):
     )
     cnic_verified_at = models.DateTimeField(blank=True, null=True)
     
+    # Admin Verification
+    admin_verification_status = models.CharField(
+        max_length=20,
+        choices=[
+            ('pending', 'Pending'),
+            ('verified', 'Verified'),
+            ('rejected', 'Rejected'),
+        ],
+        default='pending',
+        help_text='Admin verification status. Profile shows 95% until admin verifies, then 100%.'
+    )
+    admin_verified_at = models.DateTimeField(blank=True, null=True)
+    
     # Profile status
     is_disabled = models.BooleanField(
         default=False,
@@ -344,12 +357,11 @@ class UserProfile(models.Model):
             'employment_status': 7,
             'profession': 6,
             
-            # Media (10%)
-            'profile_picture': 10,
+            # Media (15%)
+            'profile_picture': 15,
             
-            # Additional Info (10%)
-            'has_disability': 5,
-            'cnic_verification_status': 5,  # Bonus if verified
+            # Admin Verification (5%) - Only counts if verified
+            'admin_verification_status': 5,
         }
         
         completed_weight = 0
@@ -360,7 +372,7 @@ class UserProfile(models.Model):
             'family_details': {'completed': 0, 'total': 0},
             'education_employment': {'completed': 0, 'total': 0},
             'media': {'completed': 0, 'total': 0},
-            'additional_info': {'completed': 0, 'total': 0},
+            'admin_verification': {'completed': 0, 'total': 0},
         }
         
         # Section mapping
@@ -388,8 +400,7 @@ class UserProfile(models.Model):
             'employment_status': 'education_employment',
             'profession': 'education_employment',
             'profile_picture': 'media',
-            'has_disability': 'additional_info',
-            'cnic_verification_status': 'additional_info',
+            'admin_verification_status': 'admin_verification',
         }
         
         # Check each field
@@ -400,15 +411,12 @@ class UserProfile(models.Model):
             value = getattr(self, field, None)
             is_filled = False
             
-            if field == 'cnic_verification_status':
-                # Special case: only count if verified
+            if field == 'admin_verification_status':
+                # Special case: only count if admin verified
                 is_filled = value == 'verified'
             elif field == 'total_brothers' or field == 'total_sisters':
                 # These are integers, 0 is a valid value
                 is_filled = value is not None
-            elif field == 'has_disability':
-                # Boolean field, always has a value
-                is_filled = True
             elif isinstance(value, bool):
                 # Boolean fields are always filled
                 is_filled = True
