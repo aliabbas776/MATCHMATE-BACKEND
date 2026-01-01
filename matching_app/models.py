@@ -1192,7 +1192,6 @@ class Device(models.Model):
     )
     fcm_token = models.CharField(
         max_length=255,
-        unique=True,
         db_index=True,
         help_text='Firebase Cloud Messaging token for this device',
     )

@@ -2014,29 +2014,26 @@ class DeviceRegisterSerializer(serializers.Serializer):
         return value.strip()
     
     def create(self, validated_data):
-        """Register or update a device token for the authenticated user."""
+        """Register a new device token for the authenticated user.
+        
+        Each registration creates a new device record, even if the token is the same.
+        Old devices with the same token are deactivated.
+        """
         user = self.context['request'].user
         fcm_token = validated_data['fcm_token']
         device_type = validated_data['device_type']
         
-        # Deactivate any existing device with the same token (for other users)
-        Device.objects.filter(fcm_token=fcm_token).exclude(user=user).update(is_active=False)
+        # Deactivate any existing devices with the same token (for this user and other users)
+        Device.objects.filter(fcm_token=fcm_token).update(is_active=False)
         
-        # Get or create device for this user
-        device, created = Device.objects.get_or_create(
+        # Always create a new device record for each registration
+        # This allows tracking registration history even if the token is the same
+        device = Device.objects.create(
             user=user,
             fcm_token=fcm_token,
-            defaults={
-                'device_type': device_type,
-                'is_active': True,
-            }
+            device_type=device_type,
+            is_active=True,
         )
-        
-        # If device exists but was inactive, reactivate it and update device_type
-        if not created:
-            device.is_active = True
-            device.device_type = device_type
-            device.save(update_fields=['is_active', 'device_type', 'updated_at'])
         
         return device
 

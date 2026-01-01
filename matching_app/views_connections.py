@@ -5,8 +5,11 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.authentication import JWTAuthentication
+import logging
 
 from .models import SubscriptionPlan, UserConnection, UserSubscription
+
+logger = logging.getLogger(__name__)
 
 
 def get_or_create_user_subscription(user):
@@ -119,6 +122,17 @@ class ConnectionRequestView(ConnectionBaseView):
             UserSubscription.objects.filter(user=request.user).update(
                 connections_used=F('connections_used') + 1
             )
+        
+        # Send push notification to receiver (outside transaction to avoid blocking)
+        try:
+            from .services.notification_examples import send_connection_request_notification
+            send_connection_request_notification(
+                from_user=request.user,
+                to_user=connection.to_user
+            )
+        except Exception as e:
+            # Log error but don't fail the request if notification fails
+            logger.error(f"Failed to send push notification for connection request {connection.id}: {str(e)}")
         
         response_data = self._serialize(connection, request, many=False)
         return Response(response_data, status=status.HTTP_201_CREATED)
