@@ -142,20 +142,121 @@ class SendMessageView(MessageBaseView):
                 )
         
         # Send push notification to receiver (outside transaction to avoid blocking)
+        notification_result = None
+        notification_status = {
+            'attempted': False,
+            'success': False,
+            'error': None,
+            'devices_found': 0,
+            'devices_notified': 0,
+            'devices_failed': 0,
+        }
+        
         try:
             from .services.notification_examples import send_new_message_notification
-            # Truncate message content for notification preview (first 100 chars)
-            message_preview = message.content[:100] + ('...' if len(message.content) > 100 else '')
-            send_new_message_notification(
-                sender_user=request.user,
-                receiver_user=receiver,
-                message_content=message_preview
+            from .models import Device
+            
+            logger.info(
+                f"[PUSH NOTIFICATION] Message {message.id}: Starting push notification process. "
+                f"Sender: {request.user.id} ({request.user.username}), "
+                f"Receiver: {receiver.id} ({receiver.username})"
             )
+            
+            # Check if receiver has registered devices
+            receiver_devices = Device.objects.filter(user=receiver, is_active=True)
+            device_count = receiver_devices.count()
+            notification_status['devices_found'] = device_count
+            notification_status['attempted'] = True
+            
+            if device_count == 0:
+                logger.warning(
+                    f"[PUSH NOTIFICATION] Message {message.id}: ❌ FAILED - "
+                    f"Receiver {receiver.id} ({receiver.username}) has NO active devices registered. "
+                    f"Push notification cannot be sent. Receiver must register device first using /api/devices/register/"
+                )
+                notification_status['error'] = 'No active devices found for receiver'
+            else:
+                logger.info(
+                    f"[PUSH NOTIFICATION] Message {message.id}: Found {device_count} active device(s) for receiver {receiver.id}"
+                )
+                
+                # Log device details
+                for device in receiver_devices:
+                    logger.info(
+                        f"[PUSH NOTIFICATION] Message {message.id}: Device ID {device.id}, "
+                        f"Type: {device.device_type}, Token: {device.fcm_token[:30]}..."
+                    )
+                
+                # Truncate message content for notification preview (first 100 chars)
+                message_preview = message.content[:100] + ('...' if len(message.content) > 100 else '')
+                
+                logger.info(
+                    f"[PUSH NOTIFICATION] Message {message.id}: Sending notification. "
+                    f"Preview: '{message_preview}'"
+                )
+                
+                notification_result = send_new_message_notification(
+                    sender_user=request.user,
+                    receiver_user=receiver,
+                    message_content=message_preview
+                )
+                
+                if notification_result:
+                    total_devices = notification_result.get('total_devices', 0)
+                    successful = notification_result.get('successful', 0)
+                    failed = notification_result.get('failed', 0)
+                    invalid_removed = notification_result.get('invalid_tokens_removed', 0)
+                    
+                    notification_status['devices_notified'] = successful
+                    notification_status['devices_failed'] = failed
+                    
+                    if successful > 0:
+                        logger.info(
+                            f"[PUSH NOTIFICATION] Message {message.id}: ✅ SUCCESS - "
+                            f"Notification sent to {successful} out of {total_devices} device(s). "
+                            f"Failed: {failed}, Invalid tokens removed: {invalid_removed}"
+                        )
+                        notification_status['success'] = True
+                    else:
+                        logger.warning(
+                            f"[PUSH NOTIFICATION] Message {message.id}: ⚠️ PARTIAL FAILURE - "
+                            f"Notification attempted but failed for all {total_devices} device(s). "
+                            f"Failed: {failed}, Invalid tokens removed: {invalid_removed}"
+                        )
+                        notification_status['error'] = f'Failed to send to all {total_devices} device(s)'
+                else:
+                    logger.error(
+                        f"[PUSH NOTIFICATION] Message {message.id}: ❌ FAILED - "
+                        f"send_new_message_notification returned None"
+                    )
+                    notification_status['error'] = 'Notification function returned None'
+                    
         except Exception as e:
             # Log error but don't fail the request if notification fails
-            logger.error(f"Failed to send push notification for message {message.id}: {str(e)}")
+            error_msg = str(e)
+            notification_status['error'] = error_msg
+            
+            logger.error(
+                f"[PUSH NOTIFICATION] Message {message.id}: ❌ EXCEPTION - "
+                f"Failed to send push notification: {error_msg}",
+                exc_info=True  # Include full traceback
+            )
+        
+        # Log final status
+        logger.info(
+            f"[PUSH NOTIFICATION] Message {message.id}: Final status - "
+            f"Attempted: {notification_status['attempted']}, "
+            f"Success: {notification_status['success']}, "
+            f"Devices found: {notification_status['devices_found']}, "
+            f"Devices notified: {notification_status['devices_notified']}, "
+            f"Error: {notification_status['error'] or 'None'}"
+        )
         
         response_data = MessageSerializer(message, context={'request': request}).data
+        
+        # Add push notification status to response for debugging
+        response_data['push_notification'] = notification_status
+        
         return Response(response_data, status=status.HTTP_201_CREATED)
 
 
