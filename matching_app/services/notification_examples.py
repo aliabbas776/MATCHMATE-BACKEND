@@ -140,6 +140,14 @@ def send_connection_request_notification(from_user, to_user):
             'from_user_name': from_user_name,
         }
         
+        # Log the notification payload structure for debugging
+        logger.info(
+            f"[NOTIFICATION PAYLOAD] Connection request to user {to_user.id}:\n"
+            f"  Title: {title}\n"
+            f"  Body: {body}\n"
+            f"  Data: {data}"
+        )
+        
         result = notification_service.send_to_user(
             user=to_user,
             title=title,
@@ -147,6 +155,16 @@ def send_connection_request_notification(from_user, to_user):
             data=data,
             priority='high',
         )
+        
+        # Add notification payload to result for debugging
+        if result:
+            result['notification_payload'] = {
+                'notification': {
+                    'title': title,
+                    'body': body
+                },
+                'data': data
+            }
         
         logger.info(
             f"Connection request notification sent to user {to_user.id}: "
@@ -156,7 +174,10 @@ def send_connection_request_notification(from_user, to_user):
         return result
         
     except Exception as e:
-        logger.error(f"Failed to send connection request notification: {str(e)}")
+        logger.error(
+            f"Failed to send connection request notification: {str(e)}",
+            exc_info=True  # Include full traceback
+        )
         return None
 
 

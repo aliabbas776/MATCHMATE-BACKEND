@@ -124,17 +124,116 @@ class ConnectionRequestView(ConnectionBaseView):
             )
         
         # Send push notification to receiver (outside transaction to avoid blocking)
+        notification_result = None
+        notification_status = {
+            'attempted': False,
+            'success': False,
+            'error': None,
+            'devices_found': 0,
+            'devices_notified': 0,
+            'devices_failed': 0,
+        }
+        
         try:
             from .services.notification_examples import send_connection_request_notification
-            send_connection_request_notification(
-                from_user=request.user,
-                to_user=connection.to_user
+            from .models import Device
+            
+            logger.info(
+                f"[PUSH NOTIFICATION] Connection Request {connection.id}: Starting push notification process. "
+                f"From: {request.user.id} ({request.user.username}), "
+                f"To: {connection.to_user.id} ({connection.to_user.username})"
             )
+            
+            # Check if receiver has registered devices
+            receiver_devices = Device.objects.filter(user=connection.to_user, is_active=True)
+            device_count = receiver_devices.count()
+            notification_status['devices_found'] = device_count
+            notification_status['attempted'] = True
+            
+            if device_count == 0:
+                logger.warning(
+                    f"[PUSH NOTIFICATION] Connection Request {connection.id}: ❌ FAILED - "
+                    f"Receiver {connection.to_user.id} ({connection.to_user.username}) has NO active devices registered. "
+                    f"Push notification cannot be sent. Receiver must register device first using /api/devices/register/"
+                )
+                notification_status['error'] = 'No active devices found for receiver'
+            else:
+                logger.info(
+                    f"[PUSH NOTIFICATION] Connection Request {connection.id}: Found {device_count} active device(s) for receiver {connection.to_user.id}"
+                )
+                
+                # Log device details
+                for device in receiver_devices:
+                    logger.info(
+                        f"[PUSH NOTIFICATION] Connection Request {connection.id}: Device ID {device.id}, "
+                        f"Type: {device.device_type}, Token: {device.fcm_token[:30]}..."
+                    )
+                
+                notification_result = send_connection_request_notification(
+                    from_user=request.user,
+                    to_user=connection.to_user
+                )
+                
+                if notification_result:
+                    total_devices = notification_result.get('total_devices', 0)
+                    successful = notification_result.get('successful', 0)
+                    failed = notification_result.get('failed', 0)
+                    invalid_removed = notification_result.get('invalid_tokens_removed', 0)
+                    
+                    notification_status['devices_notified'] = successful
+                    notification_status['devices_failed'] = failed
+                    
+                    # Include notification payload in status for debugging
+                    if 'notification_payload' in notification_result:
+                        notification_status['payload'] = notification_result['notification_payload']
+                    
+                    if successful > 0:
+                        logger.info(
+                            f"[PUSH NOTIFICATION] Connection Request {connection.id}: ✅ SUCCESS - "
+                            f"Notification sent to {successful} out of {total_devices} device(s). "
+                            f"Failed: {failed}, Invalid tokens removed: {invalid_removed}"
+                        )
+                        notification_status['success'] = True
+                    else:
+                        logger.warning(
+                            f"[PUSH NOTIFICATION] Connection Request {connection.id}: ⚠️ PARTIAL FAILURE - "
+                            f"Notification attempted but failed for all {total_devices} device(s). "
+                            f"Failed: {failed}, Invalid tokens removed: {invalid_removed}"
+                        )
+                        notification_status['error'] = f'Failed to send to all {total_devices} device(s)'
+                else:
+                    logger.error(
+                        f"[PUSH NOTIFICATION] Connection Request {connection.id}: ❌ FAILED - "
+                        f"send_connection_request_notification returned None"
+                    )
+                    notification_status['error'] = 'Notification function returned None'
+                    
         except Exception as e:
             # Log error but don't fail the request if notification fails
-            logger.error(f"Failed to send push notification for connection request {connection.id}: {str(e)}")
+            error_msg = str(e)
+            notification_status['error'] = error_msg
+            
+            logger.error(
+                f"[PUSH NOTIFICATION] Connection Request {connection.id}: ❌ EXCEPTION - "
+                f"Failed to send push notification: {error_msg}",
+                exc_info=True  # Include full traceback
+            )
+        
+        # Log final status
+        logger.info(
+            f"[PUSH NOTIFICATION] Connection Request {connection.id}: Final status - "
+            f"Attempted: {notification_status['attempted']}, "
+            f"Success: {notification_status['success']}, "
+            f"Devices found: {notification_status['devices_found']}, "
+            f"Devices notified: {notification_status['devices_notified']}, "
+            f"Error: {notification_status['error'] or 'None'}"
+        )
         
         response_data = self._serialize(connection, request, many=False)
+        
+        # Add push notification status to response for debugging
+        response_data['push_notification'] = notification_status
+        
         return Response(response_data, status=status.HTTP_201_CREATED)
 
 
