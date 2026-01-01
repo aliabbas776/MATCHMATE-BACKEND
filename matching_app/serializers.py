@@ -2016,24 +2016,38 @@ class DeviceRegisterSerializer(serializers.Serializer):
     def create(self, validated_data):
         """Register a new device token for the authenticated user.
         
-        Each registration creates a new device record, even if the token is the same.
-        Old devices with the same token are deactivated.
+        Each registration deletes old device records and creates a fresh new record.
+        This ensures only the latest registration is kept for each user.
         """
+        import logging
+        logger = logging.getLogger(__name__)
+        
         user = self.context['request'].user
         fcm_token = validated_data['fcm_token']
         device_type = validated_data['device_type']
         
-        # Deactivate any existing devices with the same token (for this user and other users)
-        Device.objects.filter(fcm_token=fcm_token).update(is_active=False)
+        # Count and delete all existing devices for this user (clean slate approach)
+        old_devices_count = Device.objects.filter(user=user).count()
+        deleted_count = Device.objects.filter(user=user).delete()[0]
         
-        # Always create a new device record for each registration
-        # This allows tracking registration history even if the token is the same
+        logger.info(
+            f"User {user.id} device registration: Deleted {deleted_count} old device(s), "
+            f"creating new device with token {fcm_token[:20]}..."
+        )
+        
+        # Also deactivate any devices with the same token for other users
+        # (to prevent token conflicts, but don't delete other users' devices)
+        Device.objects.filter(fcm_token=fcm_token).exclude(user=user).update(is_active=False)
+        
+        # Create a new device record for this registration
         device = Device.objects.create(
             user=user,
             fcm_token=fcm_token,
             device_type=device_type,
             is_active=True,
         )
+        
+        logger.info(f"Created new device record ID {device.id} for user {user.id}")
         
         return device
 
