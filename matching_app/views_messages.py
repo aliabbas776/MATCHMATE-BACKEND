@@ -210,6 +210,10 @@ class SendMessageView(MessageBaseView):
                     notification_status['devices_notified'] = successful
                     notification_status['devices_failed'] = failed
                     
+                    # Include notification payload in status for debugging
+                    if 'notification_payload' in notification_result:
+                        notification_status['payload'] = notification_result['notification_payload']
+                    
                     if successful > 0:
                         logger.info(
                             f"[PUSH NOTIFICATION] Message {message.id}: ✅ SUCCESS - "

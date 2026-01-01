@@ -68,6 +68,14 @@ def send_new_message_notification(sender_user, receiver_user, message_content: s
             'senderLastName': sender_last_name,
         }
         
+        # Log the notification payload structure for debugging
+        logger.info(
+            f"[NOTIFICATION PAYLOAD] Sending to user {receiver_user.id}:\n"
+            f"  Title: {title}\n"
+            f"  Body: {body}\n"
+            f"  Data: {data}"
+        )
+        
         result = notification_service.send_to_user(
             user=receiver_user,
             title=title,
@@ -75,6 +83,16 @@ def send_new_message_notification(sender_user, receiver_user, message_content: s
             data=data,
             priority='high',
         )
+        
+        # Add notification payload to result for debugging
+        if result:
+            result['notification_payload'] = {
+                'notification': {
+                    'title': title,
+                    'body': body
+                },
+                'data': data
+            }
         
         logger.info(
             f"New message notification sent to user {receiver_user.id}: "
