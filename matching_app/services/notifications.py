@@ -38,9 +38,12 @@ class FCMNotificationService:
             
             self.app = get_firebase_app()
             self.messaging = messaging
-            logger.info("FCM Notification Service initialized")
+            logger.info("FCM Notification Service initialized successfully")
         except Exception as e:
-            logger.error(f"Failed to initialize FCM service: {str(e)}")
+            logger.error(
+                f"Failed to initialize FCM service: {str(e)}",
+                exc_info=True  # Include full traceback
+            )
             raise
     
     def send_to_device(

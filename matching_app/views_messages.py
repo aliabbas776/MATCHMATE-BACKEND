@@ -187,7 +187,7 @@ class SendMessageView(MessageBaseView):
                         f"Type: {device.device_type}, Token: {device.fcm_token[:30]}..."
                     )
                 
-                # Truncate message content for notification preview (first 100 chars)
+                # Prepare message preview for logging
                 message_preview = message.content[:100] + ('...' if len(message.content) > 100 else '')
                 
                 logger.info(
@@ -198,7 +198,7 @@ class SendMessageView(MessageBaseView):
                 notification_result = send_new_message_notification(
                     sender_user=request.user,
                     receiver_user=receiver,
-                    message_content=message_preview
+                    message_content=message.content  # Pass full content, function will truncate for body
                 )
                 
                 if notification_result:

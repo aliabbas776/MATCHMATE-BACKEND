@@ -28,29 +28,44 @@ def send_new_message_notification(sender_user, receiver_user, message_content: s
         send_new_message_notification(
             sender_user=request.user,
             receiver_user=receiver,
-            message_content=message.content[:100]  # First 100 chars
+            message_content=message.content  # Full message content
         )
     
     Args:
         sender_user: User who sent the message
         receiver_user: User who should receive the notification
-        message_content: Preview of the message content
+        message_content: The message content
     """
     try:
         notification_service = get_notification_service()
         
-        # Get sender's name for personalization
+        # Get sender's name and name parts for personalization
         sender_name = sender_user.get_full_name() or sender_user.username
+        sender_first_name = sender_user.first_name or ""
+        sender_last_name = sender_user.last_name or ""
         
-        title = "New Message"
-        body = f"{sender_name}: {message_content}"
+        # Truncate message content for notification body (first 100 chars)
+        message_preview = message_content[:100] + ('...' if len(message_content) > 100 else '')
         
-        # Custom data payload for deep linking
+        # Conversation ID is the sender's ID (receiver will navigate to conversation with sender)
+        conversation_id = str(sender_user.id)
+        
+        title = f"New message from {sender_name}"
+        body = message_preview
+        
+        # Custom data payload for deep linking - includes both snake_case and camelCase
         data = {
-            'type': 'new_message',
+            'type': 'message',
             'sender_id': str(sender_user.id),
+            'senderId': str(sender_user.id),
+            'conversation_id': conversation_id,
+            'conversationId': conversation_id,
             'sender_name': sender_name,
-            'message_preview': message_content[:100],
+            'senderName': sender_name,
+            'sender_first_name': sender_first_name,
+            'senderFirstName': sender_first_name,
+            'sender_last_name': sender_last_name,
+            'senderLastName': sender_last_name,
         }
         
         result = notification_service.send_to_user(
@@ -69,7 +84,10 @@ def send_new_message_notification(sender_user, receiver_user, message_content: s
         return result
         
     except Exception as e:
-        logger.error(f"Failed to send new message notification: {str(e)}")
+        logger.error(
+            f"Failed to send new message notification: {str(e)}",
+            exc_info=True  # Include full traceback
+        )
         return None
 
 
