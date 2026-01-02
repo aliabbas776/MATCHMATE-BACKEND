@@ -731,6 +731,8 @@ class UserProfileListSerializer(serializers.ModelSerializer):
             'profile_picture',
             'is_public',
             'generated_description',
+            'admin_verification_status',
+            'admin_verified_at',
             'created_at',
             'updated_at',
         ]
