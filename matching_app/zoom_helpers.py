@@ -243,6 +243,25 @@ def create_zoom_meeting(
         join_url = meeting['join_url']
         meeting_password = meeting.get('password', meeting_password)
         
+        # CRITICAL: Embed passcode in join URL for one-click join
+        # This ensures the passcode is included when the app opens the link
+        # Format: https://zoom.us/j/MEETING_ID?pwd=PASSWORD
+        from urllib.parse import urlparse, urlencode, parse_qs, urlunparse
+        parsed_url = urlparse(join_url)
+        query_params = parse_qs(parsed_url.query)
+        # Add or update the pwd parameter
+        query_params['pwd'] = [meeting_password]
+        # Reconstruct URL with embedded passcode
+        new_query = urlencode(query_params, doseq=True)
+        join_url = urlunparse((
+            parsed_url.scheme,
+            parsed_url.netloc,
+            parsed_url.path,
+            parsed_url.params,
+            new_query,
+            parsed_url.fragment
+        ))
+        
         # Verify and update settings if needed to ensure waiting room is disabled
         # This is a safety measure in case account-level settings override meeting settings
         try:
