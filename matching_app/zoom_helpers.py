@@ -246,10 +246,12 @@ def create_zoom_meeting(
         # CRITICAL: Embed passcode in join URL for one-click join
         # This ensures the passcode is included when the app opens the link
         # Format: https://zoom.us/j/MEETING_ID?pwd=PASSWORD
+        # IMPORTANT: When opening from mobile app, use system browser (not WebView)
+        # Example: Linking.openURL(zoomUrl) in React Native, or Intent in Android
         from urllib.parse import urlparse, urlencode, parse_qs, urlunparse
         parsed_url = urlparse(join_url)
         query_params = parse_qs(parsed_url.query)
-        # Add or update the pwd parameter
+        # Add or update the pwd parameter (required for passcode)
         query_params['pwd'] = [meeting_password]
         # Reconstruct URL with embedded passcode
         new_query = urlencode(query_params, doseq=True)
