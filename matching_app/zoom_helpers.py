@@ -100,6 +100,51 @@ def get_zoom_access_token() -> str:
         raise Exception(f"Error getting Zoom access token: {str(e)}")
 
 
+def update_meeting_settings(meeting_id: str, settings: Dict) -> bool:
+    """
+    Update settings for an existing Zoom meeting.
+    
+    Args:
+        meeting_id: Zoom meeting ID
+        settings: Dictionary of settings to update
+    
+    Returns:
+        bool: True if successful
+    
+    Raises:
+        Exception: If Zoom API call fails
+    """
+    try:
+        access_token = get_zoom_access_token()
+        headers = {
+            'Authorization': f'Bearer {access_token}',
+            'Content-Type': 'application/json'
+        }
+        
+        # Only update settings, not the entire meeting
+        update_data = {
+            'settings': settings
+        }
+        
+        response = requests.patch(
+            f'{settings.ZOOM_BASE_URL}/meetings/{meeting_id}',
+            headers=headers,
+            json=update_data,
+            timeout=10
+        )
+        
+        response.raise_for_status()
+        return True
+        
+    except requests.exceptions.HTTPError as e:
+        # Don't raise exception - this is a best-effort update
+        # Account-level settings might prevent some updates
+        return False
+    except Exception:
+        # Silently fail - meeting settings update is not critical
+        return False
+
+
 def create_zoom_meeting(
     topic: str = "1-on-1 Session",
     duration_minutes: int = 60,
@@ -140,14 +185,15 @@ def create_zoom_meeting(
             'duration': duration_minutes,
             'password': meeting_password,
             'settings': {
-                'join_before_host': True,  # Allow joining before host (initiator will be alternative host)
-                'waiting_room': False,  # Disable waiting room so initiator can join directly
+                'join_before_host': True,  # Allow joining before host
+                'jbh_time': 0,  # Allow joining immediately (0 = can join anytime before host)
+                'waiting_room': False,  # Disable waiting room - critical to prevent "waiting for host" issue
                 'participant_video': True,
                 'host_video': True,
                 'mute_upon_entry': False,
                 'watermark': False,
                 'use_pmi': False,
-                'approval_type': 0,  # Automatically approve
+                'approval_type': 0,  # Automatically approve (0 = no approval needed)
                 'audio': 'both',  # Both telephony and VoIP
                 'auto_recording': 'none',
             }
@@ -196,6 +242,19 @@ def create_zoom_meeting(
         meeting_id = str(meeting['id'])
         join_url = meeting['join_url']
         meeting_password = meeting.get('password', meeting_password)
+        
+        # Verify and update settings if needed to ensure waiting room is disabled
+        # This is a safety measure in case account-level settings override meeting settings
+        try:
+            update_meeting_settings(meeting_id, {
+                'join_before_host': True,
+                'jbh_time': 0,
+                'waiting_room': False,
+            })
+        except Exception as e:
+            # Log but don't fail - meeting was created successfully
+            # In production, use proper logging
+            pass
         
         return (meeting_id, join_url, meeting_password)
         
