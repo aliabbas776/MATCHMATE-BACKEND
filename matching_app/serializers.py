@@ -2146,3 +2146,194 @@ class SupportRequestSerializer(serializers.ModelSerializer):
             logger.error(f'Failed to send confirmation email for support request {support_request.id}: {str(e)}')
         
         return support_request
+
+
+# ========================================
+# User Management Serializers
+# ========================================
+
+class UserCreateSerializer(serializers.ModelSerializer):
+    """Serializer for creating users. Includes password field."""
+    password = serializers.CharField(
+        write_only=True,
+        required=True,
+        style={'input_type': 'password'},
+        validators=[validate_password],
+        help_text='User password. Must meet password validation requirements.'
+    )
+
+    class Meta:
+        model = User
+        fields = [
+            'id',
+            'username',
+            'email',
+            'first_name',
+            'last_name',
+            'password',
+            'is_active',
+            'date_joined',
+        ]
+        read_only_fields = ['id', 'date_joined']
+        extra_kwargs = {
+            'username': {'required': True},
+            'email': {'required': True},
+        }
+
+    def validate_email(self, value):
+        """Validate and normalize email."""
+        if value:
+            value = value.strip().lower()
+            if User.objects.filter(email__iexact=value).exists():
+                raise serializers.ValidationError('A user with this email already exists.')
+        return value
+
+    def validate_username(self, value):
+        """Validate username."""
+        if value:
+            value = value.strip()
+            if User.objects.filter(username__iexact=value).exists():
+                raise serializers.ValidationError('A user with this username already exists.')
+        return value
+
+    def create(self, validated_data):
+        """Create user with hashed password."""
+        password = validated_data.pop('password')
+        user = User.objects.create(**validated_data)
+        user.set_password(password)  # Hash the password
+        user.save()
+        return user
+
+
+class UserSerializer(serializers.ModelSerializer):
+    """Serializer for reading/updating users. Excludes sensitive fields."""
+    
+    class Meta:
+        model = User
+        fields = [
+            'id',
+            'username',
+            'email',
+            'first_name',
+            'last_name',
+            'is_active',
+            'date_joined',
+            'last_login',
+        ]
+        read_only_fields = ['id', 'date_joined', 'last_login']
+    
+    def validate_email(self, value):
+        """Validate and normalize email."""
+        if value:
+            value = value.strip().lower()
+            user = self.instance
+            if user and User.objects.filter(email__iexact=value).exclude(id=user.id).exists():
+                raise serializers.ValidationError('A user with this email already exists.')
+        return value
+    
+    def validate_username(self, value):
+        """Validate username."""
+        if value:
+            value = value.strip()
+            user = self.instance
+            if user and User.objects.filter(username__iexact=value).exclude(id=user.id).exists():
+                raise serializers.ValidationError('A user with this username already exists.')
+        return value
+
+
+# ========================================
+# Report Management Serializers
+# ========================================
+
+class ReportSerializer(serializers.ModelSerializer):
+    """ModelSerializer for UserReport. Handles create, read, update operations."""
+    reporter_username = serializers.CharField(source='reporter.username', read_only=True)
+    reported_user_username = serializers.CharField(source='reported_user.username', read_only=True)
+    reviewed_by_username = serializers.CharField(source='reviewed_by.username', read_only=True, allow_null=True)
+    
+    class Meta:
+        model = UserReport
+        fields = [
+            'id',
+            'reporter',
+            'reporter_username',
+            'reported_user',
+            'reported_user_username',
+            'reason',
+            'description',
+            'status',
+            'reviewed_by',
+            'reviewed_by_username',
+            'reviewed_at',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = [
+            'id',
+            'reporter',
+            'status',
+            'reviewed_by',
+            'reviewed_at',
+            'created_at',
+            'updated_at',
+        ]
+    
+    def validate_reported_user(self, value):
+        """Validate that reported user exists and is not the reporter."""
+        request_user = self.context['request'].user
+        
+        if not value.is_active:
+            raise serializers.ValidationError('Cannot report an inactive user.')
+        
+        if value == request_user:
+            raise serializers.ValidationError('You cannot report yourself.')
+        
+        # Check if user has already reported this user (only for pending reports)
+        existing_report = UserReport.objects.filter(
+            reporter=request_user,
+            reported_user=value,
+            status=settings.REPORT_STATUS_PENDING
+        ).exists()
+        
+        if existing_report:
+            raise serializers.ValidationError(
+                'You have already reported this user. Please wait for admin review.'
+            )
+        
+        return value
+    
+    def validate_reason(self, value):
+        """Validate reason field."""
+        if value:
+            return value.strip()
+        return value
+    
+    def validate_description(self, value):
+        """Validate description field."""
+        if value:
+            return value.strip()
+        return value
+    
+    def create(self, validated_data):
+        """Create report with current user as reporter."""
+        request_user = self.context['request'].user
+        validated_data['reporter'] = request_user
+        validated_data['status'] = settings.REPORT_STATUS_PENDING
+        return super().create(validated_data)
+
+
+class ReportReviewSerializer(serializers.Serializer):
+    """Serializer for admin to review reports (approve/decline)."""
+    status = serializers.ChoiceField(
+        choices=['reviewed', 'dismissed'],
+        required=True,
+        help_text='Set to "reviewed" to approve or "dismissed" to decline the report'
+    )
+    
+    def validate_status(self, value):
+        """Validate status value."""
+        if value not in ['reviewed', 'dismissed']:
+            raise serializers.ValidationError(
+                'Status must be either "reviewed" (approve) or "dismissed" (decline).'
+            )
+        return value

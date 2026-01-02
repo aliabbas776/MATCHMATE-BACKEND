@@ -64,5 +64,7 @@ urlpatterns = [
     path('devices/', DeviceListView.as_view(), name='device-list'),
     path('devices/deactivate/', DeviceDeactivateView.as_view(), name='device-deactivate'),
     path('support/', SupportRequestView.as_view(), name='support-request'),
+    # User and Report management ViewSets (production-ready REST APIs)
+    path('manage/', include('matching_app.urls_users_reports')),
 ]
 
