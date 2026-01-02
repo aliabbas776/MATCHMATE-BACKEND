@@ -20,6 +20,7 @@ from .views import (
     SubscriptionCancelView,
     SubscriptionPlanListView,
     SubscriptionUsageView,
+    SupportRequestView,
     UserAccountDeleteView,
     UserAccountView,
     UserProfileDetailView,
@@ -62,5 +63,6 @@ urlpatterns = [
     path('devices/register/', DeviceRegisterView.as_view(), name='device-register'),
     path('devices/', DeviceListView.as_view(), name='device-list'),
     path('devices/deactivate/', DeviceDeactivateView.as_view(), name='device-deactivate'),
+    path('support/', SupportRequestView.as_view(), name='support-request'),
 ]
 

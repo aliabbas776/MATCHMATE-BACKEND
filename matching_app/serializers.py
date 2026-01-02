@@ -23,6 +23,7 @@ from .models import (
     Message,
     PasswordResetOTP,
     SubscriptionPlan,
+    SupportRequest,
     UserConnection,
     UserProfile,
     UserProfileImage,
@@ -2086,3 +2087,62 @@ class DeviceDeactivateSerializer(serializers.Serializer):
             )
         
         return {'message': 'Device token deactivated successfully.'}
+
+
+class SupportRequestSerializer(serializers.ModelSerializer):
+    """Serializer for creating support requests."""
+    
+    class Meta:
+        model = models.SupportRequest
+        fields = [
+            'email',
+            'problem_description',
+        ]
+    
+    def validate_email(self, value):
+        """Validate and normalize email address."""
+        if value:
+            return value.strip().lower()
+        return value
+    
+    def validate_problem_description(self, value):
+        """Validate problem description is not empty."""
+        if not value or not value.strip():
+            raise serializers.ValidationError('Problem description cannot be empty.')
+        return value.strip()
+    
+    def create(self, validated_data):
+        """Create support request and send confirmation email."""
+        from django.conf import settings
+        from django.core.mail import send_mail
+        
+        support_request = models.SupportRequest.objects.create(**validated_data)
+        
+        # Send confirmation email
+        try:
+            subject = 'Support Request Received - MatchMate'
+            message = (
+                f'Hello,\n\n'
+                f'Thank you for contacting MatchMate support. We have received your request '
+                f'and will get back to you soon.\n\n'
+                f'Your request details:\n'
+                f'Email: {support_request.email}\n'
+                f'Description: {support_request.problem_description[:200]}{"..." if len(support_request.problem_description) > 200 else ""}\n\n'
+                f'Our team will review your request and respond as soon as possible.\n\n'
+                f'Best regards,\n'
+                f'MatchMate Support Team'
+            )
+            send_mail(
+                subject,
+                message,
+                settings.DEFAULT_FROM_EMAIL,
+                [support_request.email],
+                fail_silently=False,
+            )
+        except Exception as e:
+            # Log error but don't fail the request creation
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f'Failed to send confirmation email for support request {support_request.id}: {str(e)}')
+        
+        return support_request

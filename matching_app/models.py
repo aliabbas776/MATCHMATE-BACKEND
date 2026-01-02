@@ -1219,3 +1219,50 @@ class Device(models.Model):
     def __str__(self):
         return f'Device<{self.user.username}, {self.device_type}, {self.fcm_token[:20]}...>'
 
+
+class SupportRequest(models.Model):
+    """
+    Model to store user support requests/contact form submissions.
+    """
+    class Status(models.TextChoices):
+        PENDING = 'pending', 'Pending'
+        IN_PROGRESS = 'in_progress', 'In Progress'
+        RESOLVED = 'resolved', 'Resolved'
+        CLOSED = 'closed', 'Closed'
+
+    email = models.EmailField(
+        help_text='Email address of the user reporting the issue'
+    )
+    problem_description = models.TextField(
+        help_text='Description of the problem or issue reported by the user'
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.PENDING,
+        help_text='Current status of the support request'
+    )
+    admin_notes = models.TextField(
+        blank=True,
+        help_text='Internal notes for admin use'
+    )
+    resolved_at = models.DateTimeField(
+        blank=True,
+        null=True,
+        help_text='When the support request was resolved'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = 'Support Request'
+        verbose_name_plural = 'Support Requests'
+        indexes = [
+            models.Index(fields=['email', '-created_at']),
+            models.Index(fields=['status', '-created_at']),
+        ]
+
+    def __str__(self):
+        return f'SupportRequest<{self.email}> - {self.status} ({self.created_at.date()})'
+

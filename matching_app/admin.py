@@ -10,6 +10,7 @@ from .models import (
     SessionAuditLog,
     SessionJoinToken,
     SubscriptionPlan,
+    SupportRequest,
     UserConnection,
     UserProfile,
     UserReport,
@@ -825,3 +826,69 @@ class UserSubscriptionAdmin(admin.ModelAdmin):
             count += 1
         self.message_user(request, f'Usage reset for {count} subscription(s).')
     reset_usage.short_description = 'Reset usage counters'
+
+
+@admin.register(SupportRequest)
+class SupportRequestAdmin(admin.ModelAdmin):
+    list_display = (
+        'email',
+        'status',
+        'created_at',
+        'updated_at',
+        'resolved_at',
+    )
+    list_filter = (
+        'status',
+        'created_at',
+    )
+    search_fields = (
+        'email',
+        'problem_description',
+    )
+    readonly_fields = (
+        'created_at',
+        'updated_at',
+    )
+    fieldsets = (
+        ('Request Information', {
+            'fields': (
+                'email',
+                'problem_description',
+                'status',
+            )
+        }),
+        ('Admin Notes', {
+            'fields': ('admin_notes',)
+        }),
+        ('Timestamps', {
+            'fields': (
+                'created_at',
+                'updated_at',
+                'resolved_at',
+            ),
+            'classes': ('collapse',)
+        }),
+    )
+    date_hierarchy = 'created_at'
+    ordering = ('-created_at',)
+    
+    actions = ['mark_as_resolved', 'mark_as_in_progress', 'mark_as_closed']
+    
+    def mark_as_resolved(self, request, queryset):
+        """Mark selected requests as resolved."""
+        from django.utils import timezone
+        updated = queryset.update(status=SupportRequest.Status.RESOLVED, resolved_at=timezone.now())
+        self.message_user(request, f'{updated} request(s) marked as resolved.')
+    mark_as_resolved.short_description = 'Mark selected as resolved'
+    
+    def mark_as_in_progress(self, request, queryset):
+        """Mark selected requests as in progress."""
+        updated = queryset.update(status=SupportRequest.Status.IN_PROGRESS)
+        self.message_user(request, f'{updated} request(s) marked as in progress.')
+    mark_as_in_progress.short_description = 'Mark selected as in progress'
+    
+    def mark_as_closed(self, request, queryset):
+        """Mark selected requests as closed."""
+        updated = queryset.update(status=SupportRequest.Status.CLOSED)
+        self.message_user(request, f'{updated} request(s) marked as closed.')
+    mark_as_closed.short_description = 'Mark selected as closed'

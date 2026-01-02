@@ -17,7 +17,7 @@ from django.db.models import F
 from django.db import transaction
 from django.conf import settings
 
-from .models import CNICVerification, Device, MatchPreference, SubscriptionPlan, UserProfile, UserProfileImage, UserReport, UserSubscription
+from .models import CNICVerification, Device, MatchPreference, SubscriptionPlan, SupportRequest, UserProfile, UserProfileImage, UserReport, UserSubscription
 
 from .ocr_utils import analyze_cnic_images
 from .openai_helpers import generate_profile_description, validate_profile_photo
@@ -34,6 +34,7 @@ from .serializers import (
     RegistrationSerializer,
     SubscriptionPlanSerializer,
     SubscriptionUpgradeSerializer,
+    SupportRequestSerializer,
     UserAccountSerializer,
     UserProfileListSerializer,
     UserProfileSectionSerializer,
@@ -1736,5 +1737,41 @@ class DeviceDeactivateView(APIView):
         
         return Response(
             serializer.errors,
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+
+class SupportRequestView(APIView):
+    """
+    Public endpoint for users to submit support requests.
+    Users can report problems/issues and will receive a confirmation email.
+    """
+    
+    authentication_classes = []
+    permission_classes = []
+    parser_classes = [JSONParser, FormParser]
+    
+    def post(self, request):
+        """Create a support request and send confirmation email."""
+        serializer = SupportRequestSerializer(data=request.data)
+        
+        if serializer.is_valid():
+            support_request = serializer.save()
+            return Response(
+                {
+                    'success': True,
+                    'message': 'Support request submitted successfully. A confirmation email has been sent.',
+                    'request_id': support_request.id,
+                    'email': support_request.email,
+                    'created_at': support_request.created_at.isoformat(),
+                },
+                status=status.HTTP_201_CREATED,
+            )
+        
+        return Response(
+            {
+                'success': False,
+                'errors': serializer.errors,
+            },
             status=status.HTTP_400_BAD_REQUEST,
         )
