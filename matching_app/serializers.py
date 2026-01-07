@@ -834,7 +834,44 @@ class ConnectionUserProfileSerializer(serializers.ModelSerializer):
     def get_profile_picture(self, instance):
         request = self.context.get('request')
         helper = get_photo_visibility_helper(self.context)
-        return resolve_profile_picture_url(instance, request, helper)
+        
+        # For connection serializers, we know these are approved friends
+        # So always allow viewing profile pictures even if profile is private
+        # The helper will still handle public profiles and self-viewing correctly
+        if not instance.profile_picture:
+            return None
+        
+        # If viewer is the profile owner, always show
+        viewer_id = None
+        if request and hasattr(request, 'user') and request.user.is_authenticated:
+            viewer_id = request.user.id
+        
+        if viewer_id and instance.user_id == viewer_id:
+            url = instance.profile_picture.url
+            return request.build_absolute_uri(url) if request else url
+        
+        # Check if viewer can see (includes approved connections check)
+        if helper.can_view(instance):
+            url = instance.profile_picture.url
+            return request.build_absolute_uri(url) if request else url
+        
+        # If we're in a connection context and the helper says no, 
+        # double-check if we're actually connected (safety check)
+        if viewer_id:
+            from .models import UserConnection
+            is_connected = UserConnection.objects.filter(
+                status=UserConnection.Status.APPROVED,
+            ).filter(
+                Q(from_user_id=viewer_id, to_user_id=instance.user_id) |
+                Q(from_user_id=instance.user_id, to_user_id=viewer_id)
+            ).exists()
+            
+            if is_connected:
+                # They are connected, so show the photo
+                url = instance.profile_picture.url
+                return request.build_absolute_uri(url) if request else url
+        
+        return None
 
 
 class ConnectionUserSummarySerializer(serializers.ModelSerializer):
