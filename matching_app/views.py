@@ -10,6 +10,18 @@ from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.pagination import PageNumberPagination
 
+
+from django.shortcuts import redirect
+from django.http import JsonResponse
+from google_auth_oauthlib.flow import Flow
+from googleapiclient.discovery import build
+from google.oauth2.credentials import Credentials
+from google.auth.transport.requests import Request
+from django.conf import settings
+import json
+from datetime import datetime, timedelta
+
+
 from django.contrib.auth import get_user_model
 from django.core.files.base import ContentFile
 from django.utils import timezone
@@ -17,7 +29,7 @@ from django.db.models import F
 from django.db import transaction
 from django.conf import settings
 
-from .models import CNICVerification, Device, MatchPreference, SubscriptionPlan, SupportRequest, UserProfile, UserProfileImage, UserReport, UserSubscription
+from .models import CNICVerification, Device, GoogleOAuthToken, MatchPreference, SubscriptionPlan, SupportRequest, UserProfile, UserProfileImage, UserReport, UserSubscription
 
 from .ocr_utils import analyze_cnic_images
 from .openai_helpers import generate_profile_description, validate_profile_photo
@@ -1775,3 +1787,277 @@ class SupportRequestView(APIView):
             },
             status=status.HTTP_400_BAD_REQUEST,
         )
+    
+
+def _get_google_credentials_from_file():
+    """Load Google OAuth client credentials from JSON file."""
+    credentials_path = settings.BASE_DIR / 'client_secret_90144230544-0fpt13jenpce2hdb7lhhvd89bf3dfa73.apps.googleusercontent.com.json'
+    with open(credentials_path, 'r') as f:
+        creds_data = json.load(f)
+    return creds_data['web']
+
+
+def _get_or_refresh_user_credentials(user):
+    """
+    Get valid Google OAuth credentials for a user, refreshing if necessary.
+    Returns Credentials object or None if user hasn't authorized.
+    """
+    try:
+        oauth_token = GoogleOAuthToken.objects.get(user=user)
+    except GoogleOAuthToken.DoesNotExist:
+        return None
+    
+    # Create credentials object from stored data
+    creds_data = {
+        'token': oauth_token.access_token,
+        'refresh_token': oauth_token.refresh_token,
+        'token_uri': oauth_token.token_uri,
+        'client_id': oauth_token.client_id,
+        'client_secret': oauth_token.client_secret,
+        'scopes': oauth_token.scopes.split(',') if oauth_token.scopes else []
+    }
+    
+    credentials = Credentials(**creds_data)
+    
+    # Refresh token if expired or about to expire
+    if credentials.expired or (oauth_token.expires_at and oauth_token.expires_at <= timezone.now() + timedelta(minutes=5)):
+        try:
+            credentials.refresh(Request())
+            # Update stored token
+            oauth_token.access_token = credentials.token
+            if credentials.expiry:
+                oauth_token.expires_at = credentials.expiry
+            oauth_token.save(update_fields=['access_token', 'expires_at', 'updated_at'])
+        except Exception as e:
+            # Token refresh failed, user needs to re-authorize
+            oauth_token.delete()
+            return None
+    
+    return credentials
+
+
+class GoogleLoginView(APIView):
+    """
+    Initiate Google OAuth2 flow for Calendar/Meet.
+    Requires JWT authentication - user must be logged in.
+    """
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        credentials_path = settings.BASE_DIR / 'client_secret_90144230544-0fpt13jenpce2hdb7lhhvd89bf3dfa73.apps.googleusercontent.com.json'
+
+        flow = Flow.from_client_secrets_file(
+            credentials_path,
+            scopes=['https://www.googleapis.com/auth/calendar.events'],
+            redirect_uri='http://localhost:8000/oauth/callback/'
+        )
+
+        # Encode the user ID in the OAuth "state" parameter so the callback
+        # can associate the Google authorization with the correct user,
+        # without relying on Django session cookies shared between Postman and browser.
+        auth_url, state = flow.authorization_url(
+            prompt='consent',
+            access_type='offline',
+            include_granted_scopes='true',
+            state=str(request.user.id),
+        )
+        # Return the Google OAuth URL as JSON so clients (Postman / mobile apps)
+        # can open it in a browser to complete consent.
+        return JsonResponse(
+            {
+                'success': True,
+                'auth_url': auth_url,
+            }
+        )
+
+
+def google_callback(request):
+    """
+    Handle Google OAuth2 callback and store tokens in database.
+    """
+    state = request.GET.get('state')
+    code = request.GET.get('code')
+    if not code:
+        return JsonResponse(
+            {'error': 'Authorization code not provided'},
+            status=400
+        )
+    
+    # Get user from state (contains user ID set when starting OAuth flow)
+    if not state:
+        return JsonResponse(
+            {'error': 'Missing state parameter. Please start the authorization again.'},
+            status=400
+        )
+    user_id = state
+    
+    try:
+        user = User.objects.get(id=user_id)
+    except User.DoesNotExist:
+        return JsonResponse(
+            {'error': 'User not found'},
+            status=404
+        )
+    
+    credentials_path = settings.BASE_DIR / 'client_secret_90144230544-0fpt13jenpce2hdb7lhhvd89bf3dfa73.apps.googleusercontent.com.json'
+    creds_data = _get_google_credentials_from_file()
+
+    flow = Flow.from_client_secrets_file(
+        credentials_path,
+        scopes=['https://www.googleapis.com/auth/calendar.events'],
+        redirect_uri='http://localhost:8000/oauth/callback/'
+    )
+
+    flow.fetch_token(code=code)
+    credentials = flow.credentials
+    
+    # Store or update tokens in database
+    oauth_token, created = GoogleOAuthToken.objects.update_or_create(
+        user=user,
+        defaults={
+            'access_token': credentials.token,
+            'refresh_token': credentials.refresh_token,
+            'token_uri': credentials.token_uri,
+            'client_id': creds_data['client_id'],
+            'client_secret': creds_data['client_secret'],
+            'scopes': ','.join(credentials.scopes) if credentials.scopes else '',
+            'expires_at': credentials.expiry,
+        }
+    )
+    
+    return JsonResponse({
+        'success': True,
+        'message': 'Google Calendar/Meet access authorized successfully. You can now create meetings via the API.',
+        'user_id': user.id
+    })
+
+
+class CreateGoogleMeetView(APIView):
+    """
+    Authenticated API endpoint to create a Google Meet meeting.
+    
+    POST /api/google/meet/create/
+    {
+        "summary": "Meeting Title",
+        "start_time": "2026-01-20T10:00:00Z",  # ISO format
+        "end_time": "2026-01-20T11:00:00Z",    # ISO format
+        "description": "Optional meeting description"
+    }
+    """
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        # Check if user has authorized Google Calendar
+        credentials = _get_or_refresh_user_credentials(request.user)
+        if not credentials:
+            return Response(
+                {
+                    'error': 'Google Calendar not authorized',
+                    'message': 'Please authorize Google Calendar access first by visiting /api/google/login/',
+                    'authorization_url': request.build_absolute_uri('/api/google/login/')
+                },
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        # Parse request data
+        summary = request.data.get('summary', 'MatchMate Meeting')
+        start_time = request.data.get('start_time')
+        end_time = request.data.get('end_time')
+        description = request.data.get('description', '')
+        
+        # Validate required fields
+        if not start_time or not end_time:
+            return Response(
+                {'error': 'start_time and end_time are required (ISO format)'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            # Parse datetime strings
+            start_dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+            end_dt = datetime.fromisoformat(end_time.replace('Z', '+00:00'))
+            
+            # Validate end is after start
+            if end_dt <= start_dt:
+                return Response(
+                    {'error': 'end_time must be after start_time'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        except ValueError as e:
+            return Response(
+                {'error': f'Invalid datetime format: {str(e)}. Use ISO format (e.g., 2026-01-20T10:00:00Z)'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            # Build Calendar service
+            service = build('calendar', 'v3', credentials=credentials)
+            
+            # Create event with Google Meet
+            event = {
+                'summary': summary,
+                'description': description,
+                'start': {
+                    'dateTime': start_dt.isoformat(),
+                    'timeZone': 'UTC',
+                },
+                'end': {
+                    'dateTime': end_dt.isoformat(),
+                    'timeZone': 'UTC',
+                },
+                'conferenceData': {
+                    'createRequest': {
+                        'requestId': f'meet-{request.user.id}-{int(timezone.now().timestamp())}',
+                        'conferenceSolutionKey': {
+                            'type': 'hangoutsMeet'
+                        }
+                    }
+                }
+            }
+            
+            # Insert event
+            created_event = service.events().insert(
+                calendarId='primary',
+                body=event,
+                conferenceDataVersion=1
+            ).execute()
+            
+            meet_link = created_event.get('hangoutLink') or created_event.get('conferenceData', {}).get('entryPoints', [{}])[0].get('uri', '')
+            
+            # Normalize the Meet link to ensure it's a proper URL
+            if meet_link:
+                meet_link = meet_link.strip()
+                # Ensure the link starts with https://
+                if not meet_link.startswith('http://') and not meet_link.startswith('https://'):
+                    if meet_link.startswith('meet.google.com/'):
+                        meet_link = 'https://' + meet_link
+                    elif '/' in meet_link:
+                        meet_link = 'https://meet.google.com' + (meet_link if meet_link.startswith('/') else '/' + meet_link)
+                    else:
+                        meet_link = f'https://meet.google.com/{meet_link}'
+                # Ensure it's using https (not http)
+                if meet_link.startswith('http://'):
+                    meet_link = meet_link.replace('http://', 'https://', 1)
+            
+            return Response(
+                {
+                    'success': True,
+                    'meet_link': meet_link,
+                    'event_id': created_event.get('id'),
+                    'event_summary': created_event.get('summary'),
+                    'start_time': created_event.get('start', {}).get('dateTime'),
+                    'end_time': created_event.get('end', {}).get('dateTime'),
+                },
+                status=status.HTTP_201_CREATED
+            )
+        except Exception as e:
+            return Response(
+                {
+                    'error': 'Failed to create Google Meet',
+                    'message': str(e)
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+

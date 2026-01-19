@@ -138,14 +138,15 @@ class StartSessionView(SessionBaseView):
         serializer.is_valid(raise_exception=True)
         session = serializer.save()
         
-        # Automatically send a message in the chat with the Zoom link
+        # Automatically send a message in the chat with the Google Meet link
         try:
             # Determine the other participant
             other_user = session.participant if request.user == session.initiator else session.initiator
             
-            # Create a message with the Zoom link
+            # Create a message with the Google Meet link
+            # session.zoom_meeting_url  # COMMENTED OUT - Replaced with Google Meet
             message_content = (
-                f"{session.zoom_meeting_url}\n\n"
+                f"{session.google_meet_link}\n\n"
                 f"If you are ready for this session, please click on this link to join."
             )
             
@@ -211,9 +212,11 @@ class ValidateJoinTokenView(SessionBaseView):
             {
                 'valid': True,
                 'session': response_data,
-                'zoom_meeting_url': session.zoom_meeting_url,
-                'zoom_meeting_id': session.zoom_meeting_id,
-                'zoom_meeting_password': session.zoom_meeting_password,
+                # 'zoom_meeting_url': session.zoom_meeting_url,  # COMMENTED OUT
+                # 'zoom_meeting_id': session.zoom_meeting_id,  # COMMENTED OUT
+                # 'zoom_meeting_password': session.zoom_meeting_password,  # COMMENTED OUT
+                'google_meet_link': session.google_meet_link,
+                'google_meet_event_id': session.google_meet_event_id,
             },
             status=status.HTTP_200_OK,
         )
@@ -302,3 +305,94 @@ class SessionAuditLogsView(SessionBaseView):
         serializer = SessionAuditLogSerializer(audit_logs, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
+
+class GetSDKSignatureView(SessionBaseView):
+    """
+    Endpoint for getting Google Meet link (Zoom SDK replaced with Google Meet).
+    
+    NOTE: This endpoint originally generated Zoom SDK signatures, but has been
+    updated to return Google Meet links instead. Google Meet doesn't require
+    SDK signatures - users can join directly via the link.
+    
+    This endpoint returns the Google Meet link for joining the session.
+    """
+    def post(self, request, session_id):
+        try:
+            session = Session.objects.select_related('initiator', 'participant').get(id=session_id)
+        except Session.DoesNotExist:
+            return Response(
+                {'error': 'Session not found.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        
+        # Verify user is a participant
+        if request.user not in [session.initiator, session.participant]:
+            return Response(
+                {'error': 'You are not a participant in this session.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        
+        # Check session status
+        if session.status != Session.Status.ACTIVE:
+            return Response(
+                {'error': f'Cannot join session. Current status: {session.status}.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        
+        # Check if meeting has been created
+        # if not session.zoom_meeting_id:  # COMMENTED OUT - Zoom check
+        if not session.google_meet_link:
+            return Response(
+                {'error': 'Google Meet link has not been created yet. Please start the session first.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        
+        # ZOOM SDK CODE COMMENTED OUT - Google Meet doesn't use SDK signatures
+        # Determine user role based on who created the meeting
+        # Only the initiator (meeting creator) gets host role (1)
+        # All others get participant role (0)
+        is_host = (request.user == session.initiator)
+        # role = 1 if is_host else 0
+        
+        # Get user name for the meeting
+        user_name = request.user.username
+        if hasattr(request.user, 'first_name') and request.user.first_name:
+            user_name = f"{request.user.first_name} {request.user.last_name or ''}".strip()
+        
+        # Generate SDK signature - COMMENTED OUT (Zoom SDK)
+        # from .zoom_helpers import generate_zoom_sdk_signature
+        # 
+        # try:
+        #     signature_data = generate_zoom_sdk_signature(
+        #         meeting_number=session.zoom_meeting_id,
+        #         role=role,
+        #         user_name=user_name,
+        #     )
+        # except ValueError as e:
+        #     return Response(
+        #         {'error': str(e)},
+        #         status=status.HTTP_400_BAD_REQUEST,
+        #     )
+        # except Exception as e:
+        #     return Response(
+        #         {'error': f'Failed to generate SDK signature: {str(e)}'},
+        #         status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        #     )
+        
+        # Return Google Meet link (no SDK signature needed for Google Meet)
+        return Response(
+            {
+                # 'signature': signature_data['signature'],  # COMMENTED OUT - Zoom SDK
+                # 'meeting_number': signature_data['meeting_number'],  # COMMENTED OUT
+                # 'role': signature_data['role'],  # COMMENTED OUT
+                # 'sdk_key': signature_data['sdk_key'],  # COMMENTED OUT
+                'user_name': user_name,
+                # 'meeting_password': session.zoom_meeting_password,  # COMMENTED OUT - Google Meet doesn't use passwords
+                'is_host': is_host,
+                'google_meet_link': session.google_meet_link,
+                'google_meet_event_id': session.google_meet_event_id,
+                # Note: zoom_meeting_url is included for fallback, but SDK should be used
+                # 'zoom_meeting_url': session.zoom_meeting_url,  # COMMENTED OUT
+            },
+            status=status.HTTP_200_OK,
+        )

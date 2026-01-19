@@ -654,19 +654,23 @@ class Session(models.Model):
     )
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
     
-    # Zoom meeting details
-    zoom_meeting_id = models.CharField(max_length=255, blank=True, null=True)
-    zoom_meeting_url = models.URLField(blank=True, null=True)
-    zoom_meeting_password = models.CharField(max_length=100, blank=True, null=True)
+    # Zoom meeting details (COMMENTED OUT - Replaced with Google Meet)
+    # zoom_meeting_id = models.CharField(max_length=255, blank=True, null=True)
+    # zoom_meeting_url = models.URLField(blank=True, null=True)
+    # zoom_meeting_password = models.CharField(max_length=100, blank=True, null=True)
     
-    # Track who started the session (generated the Zoom link)
+    # Google Meet meeting details
+    google_meet_link = models.URLField(blank=True, null=True, help_text='Google Meet meeting link')
+    google_meet_event_id = models.CharField(max_length=255, blank=True, null=True, help_text='Google Calendar event ID')
+    
+    # Track who started the session (generated the meeting link)
     started_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
         related_name='sessions_started',
         null=True,
         blank=True,
-        help_text='User who generated the Zoom link',
+        help_text='User who generated the meeting link',
     )
     
     # Ready status tracking
@@ -1265,4 +1269,56 @@ class SupportRequest(models.Model):
 
     def __str__(self):
         return f'SupportRequest<{self.email}> - {self.status} ({self.created_at.date()})'
+
+
+class GoogleOAuthToken(models.Model):
+    """
+    Model to store Google OAuth2 tokens for users to create Google Meet meetings.
+    """
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='google_oauth_token',
+        help_text='User who authorized Google Calendar/Meet access'
+    )
+    access_token = models.TextField(
+        help_text='Google OAuth2 access token'
+    )
+    refresh_token = models.TextField(
+        blank=True,
+        null=True,
+        help_text='Google OAuth2 refresh token for obtaining new access tokens'
+    )
+    token_uri = models.URLField(
+        default='https://oauth2.googleapis.com/token',
+        help_text='Token endpoint URI'
+    )
+    client_id = models.CharField(
+        max_length=255,
+        help_text='Google OAuth2 client ID'
+    )
+    client_secret = models.CharField(
+        max_length=255,
+        help_text='Google OAuth2 client secret'
+    )
+    scopes = models.TextField(
+        help_text='Comma-separated list of granted OAuth scopes'
+    )
+    expires_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text='When the access token expires'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Google OAuth Token'
+        verbose_name_plural = 'Google OAuth Tokens'
+        indexes = [
+            models.Index(fields=['user', '-updated_at']),
+        ]
+
+    def __str__(self):
+        return f'GoogleOAuthToken<{self.user.username}>'
 

@@ -17,10 +17,13 @@ from django.conf import settings
 from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import include, path
+from matching_app.views import google_callback
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/', include('matching_app.urls')),
+    # Google OAuth callback - must be at root level to match Google Cloud Console redirect URI
+    path('oauth/callback/', google_callback, name='google-callback-root'),
 ]
 
 if settings.DEBUG:

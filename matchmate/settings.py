@@ -190,6 +190,11 @@ ZOOM_CLIENT_SECRET = os.getenv('ZOOM_CLIENT_SECRET')
 ZOOM_BASE_URL = 'https://api.zoom.us/v2'
 ZOOM_OAUTH_URL = 'https://zoom.us/oauth/token'
 
+# Zoom SDK Configuration (for Mobile SDK integration)
+# These are DIFFERENT from OAuth credentials - get from Zoom Marketplace > Your App > SDK Credentials
+ZOOM_SDK_KEY = os.getenv('ZOOM_SDK_KEY')
+ZOOM_SDK_SECRET = os.getenv('ZOOM_SDK_SECRET')
+
 # Report System Configuration
 REPORT_DISABLE_THRESHOLD = int(os.getenv('REPORT_DISABLE_THRESHOLD', '5'))  # Number of distinct reports needed to disable profile
 REPORT_STATUS_PENDING = 'pending'

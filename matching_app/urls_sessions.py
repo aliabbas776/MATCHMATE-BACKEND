@@ -5,6 +5,7 @@ from .views_sessions import (
     CreateSessionView,
     EndSessionView,
     GetJoinTokenView,
+    GetSDKSignatureView,
     MarkReadyView,
     SessionAuditLogsView,
     SessionDetailView,
@@ -26,5 +27,6 @@ urlpatterns = [
     path('<int:session_id>/audit-logs/', SessionAuditLogsView.as_view(), name='audit-logs'),
     path('<int:session_id>/join-token/', GetJoinTokenView.as_view(), name='join-token'),
     path('join-token/validate/', ValidateJoinTokenView.as_view(), name='validate-join-token'),
+    path('<int:session_id>/sdk-signature/', GetSDKSignatureView.as_view(), name='sdk-signature'),
 ]
 

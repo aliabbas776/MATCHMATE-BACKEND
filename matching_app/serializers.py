@@ -1213,9 +1213,11 @@ class SessionSerializer(serializers.ModelSerializer):
             'participant_id',
             'participant',
             'status',
-            'zoom_meeting_id',
-            'zoom_meeting_url',
-            'zoom_meeting_password',
+            # 'zoom_meeting_id',  # COMMENTED OUT - Replaced with Google Meet
+            # 'zoom_meeting_url',
+            # 'zoom_meeting_password',
+            'google_meet_link',
+            'google_meet_event_id',
             'initiator_ready',
             'participant_ready',
             'can_join',
@@ -1345,7 +1347,7 @@ class SessionCreateSerializer(serializers.Serializer):
 
 
 class SessionStartSerializer(serializers.Serializer):
-    """Serializer for starting a session (generating Zoom link)."""
+    """Serializer for starting a session (generating Google Meet link)."""
     session_id = serializers.IntegerField()
 
     def validate_session_id(self, value):
@@ -1377,35 +1379,86 @@ class SessionStartSerializer(serializers.Serializer):
                 {'session_id': f'Cannot start session. Current status: {session.status}.'}
             )
 
+        # We create the Google Meet using the participant's Google account (participant = host/owner),
+        # so the participant must have authorized Google Calendar first.
+        from matching_app.models import GoogleOAuthToken
+        if not GoogleOAuthToken.objects.filter(user=session.participant).exists():
+            raise serializers.ValidationError(
+                {
+                    'google_calendar': (
+                        "Participant has not authorized Google Calendar. "
+                        "Participant must authorize by visiting /api/google/login/ (logged in as the participant)."
+                    )
+                }
+            )
+
         attrs['session'] = session
         return attrs
 
     def save(self, **kwargs):
-        from .zoom_helpers import create_zoom_meeting
+        # ZOOM CODE COMMENTED OUT - Replaced with Google Meet
+        # from .zoom_helpers import create_zoom_meeting
+        # 
+        # initiator_email = session.initiator.email if hasattr(session.initiator, 'email') else None
+        # meeting_id, join_url, password = create_zoom_meeting(
+        #     topic=f"Session: {session.initiator.username} & {session.participant.username}",
+        #     duration_minutes=60,
+        #     host_email=initiator_email,
+        # )
         
+        from .zoom_helpers import create_google_meet_meeting
+
         session = self.validated_data['session']
         request_user = self.context['request'].user
+
+        # Generate Google Meet meeting
+        # CRITICAL: Use the PARTICIPANT's Google OAuth token so the participant is the host/owner.
+        # Add the INITIATOR as an attendee so they need to ask to join.
+        # This means the initiator is effectively asking the participant to host/join.
+        # 
+        # IMPORTANT: The meeting MUST be created with session.participant's account,
+        # NOT session.initiator's account. This ensures:
+        # - Participant (abbas) = Host/Owner → Can join directly
+        # - Initiator (sherry) = Attendee → Must ask to join
         
-        # Generate Zoom meeting with initiator as alternative host
-        # This ensures the initiator can join without waiting room
-        initiator_email = session.initiator.email if hasattr(session.initiator, 'email') else None
-        meeting_id, join_url, password = create_zoom_meeting(
+        # Verify participant has Google OAuth token (should already be validated, but double-check)
+        from matching_app.models import GoogleOAuthToken
+        if not GoogleOAuthToken.objects.filter(user=session.participant).exists():
+            raise serializers.ValidationError(
+                {
+                    'google_calendar': (
+                        f"Participant '{session.participant.username}' has not authorized Google Calendar. "
+                        "Participant must authorize by visiting /api/google/login/ (logged in as the participant)."
+                    )
+                }
+            )
+        
+        initiator_email = getattr(session.initiator, 'email', None)
+        
+        # Create meeting with PARTICIPANT as host (NOT initiator)
+        meet_link, event_id = create_google_meet_meeting(
+            user=session.participant,  # CRITICAL: Host = participant's Google account (abbas)
             topic=f"Session: {session.initiator.username} & {session.participant.username}",
             duration_minutes=60,
-            host_email=initiator_email,
+            start_time=None,  # Immediate meeting
+            attendee_email=initiator_email,  # Add initiator (sherry) as attendee (they'll need to ask to join)
         )
         
         # Update session
-        session.zoom_meeting_id = meeting_id
-        session.zoom_meeting_url = join_url
-        session.zoom_meeting_password = password
+        # session.zoom_meeting_id = meeting_id  # COMMENTED OUT
+        # session.zoom_meeting_url = join_url  # COMMENTED OUT
+        # session.zoom_meeting_password = password  # COMMENTED OUT
+        session.google_meet_link = meet_link
+        session.google_meet_event_id = event_id
         session.status = models.Session.Status.ACTIVE
         session.started_at = timezone.now()
         session.started_by = request_user
         session.save(update_fields=[
-            'zoom_meeting_id',
-            'zoom_meeting_url',
-            'zoom_meeting_password',
+            # 'zoom_meeting_id',  # COMMENTED OUT
+            # 'zoom_meeting_url',  # COMMENTED OUT
+            # 'zoom_meeting_password',  # COMMENTED OUT
+            'google_meet_link',
+            'google_meet_event_id',
             'status',
             'started_at',
             'started_by',
@@ -1417,9 +1470,9 @@ class SessionStartSerializer(serializers.Serializer):
             session=session,
             user=request_user,
             event_type=models.SessionAuditLog.EventType.STARTED,
-            message=f'Session started by {request_user.username}. Zoom link generated.',
+            message=f'Session started by {request_user.username}. Google Meet link generated (host: participant).',
             metadata={
-                'zoom_meeting_id': meeting_id,
+                'google_meet_event_id': event_id,
                 'initiated_by': request_user.id,
             },
         )
@@ -1427,10 +1480,10 @@ class SessionStartSerializer(serializers.Serializer):
         models.SessionAuditLog.objects.create(
             session=session,
             user=request_user,
-            event_type=models.SessionAuditLog.EventType.ZOOM_LINK_GENERATED,
-            message=f'Zoom meeting link generated: {join_url}',
+            event_type=models.SessionAuditLog.EventType.ZOOM_LINK_GENERATED,  # Keep same event type for compatibility
+            message=f'Google Meet link generated: {meet_link}',
             metadata={
-                'zoom_meeting_id': meeting_id,
+                'google_meet_event_id': event_id,
             },
         )
         

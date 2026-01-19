@@ -1,4 +1,5 @@
 from django.urls import include, path
+from .views import GoogleLoginView, google_callback, CreateGoogleMeetView
 
 from .views import (
     ChangePasswordView,
@@ -66,5 +67,11 @@ urlpatterns = [
     path('support/', SupportRequestView.as_view(), name='support-request'),
     # User and Report management ViewSets (production-ready REST APIs)
     path('manage/', include('matching_app.urls_users_reports')),
+
+
+# Google OAuth2 URLs
+    path('google/login/', GoogleLoginView.as_view(), name='google-login'),
+    path('oauth/callback/', google_callback, name='google-callback'),
+    path('google/meet/create/', CreateGoogleMeetView.as_view(), name='create-google-meet'),
 ]
 
