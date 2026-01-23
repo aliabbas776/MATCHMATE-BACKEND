@@ -40,7 +40,11 @@ ALLOWED_HOSTS = [
     'desktop-824prp9',
     '192.168.18.71:5175',
     '44.220.158.223',
+    'mmate.website',  # Your GoDaddy domain
 ]
+# Add domain from environment variable if set
+if os.getenv('DOMAIN_NAME'):
+    ALLOWED_HOSTS.extend([domain.strip() for domain in os.getenv('DOMAIN_NAME').split(',')])
 
 
 # Application definition
@@ -190,6 +194,13 @@ ZOOM_CLIENT_ID = os.getenv('ZOOM_CLIENT_ID')
 ZOOM_CLIENT_SECRET = os.getenv('ZOOM_CLIENT_SECRET')
 ZOOM_BASE_URL = 'https://api.zoom.us/v2'
 ZOOM_OAUTH_URL = 'https://zoom.us/oauth/token'
+
+# Google OAuth Configuration
+# Set this to your production server URL (with protocol) if different from request host
+# Example: 'http://yourdomain.com' or 'https://api.yourdomain.com'
+# IMPORTANT: Use HTTP if you don't have SSL certificate, HTTPS if you do
+# If not set, will use request.build_absolute_uri() to determine dynamically
+GOOGLE_OAUTH_REDIRECT_BASE_URL = os.getenv('GOOGLE_OAUTH_REDIRECT_BASE_URL', 'http://mmate.website')
 
 # Zoom SDK Configuration (for Mobile SDK integration)
 # These are DIFFERENT from OAuth credentials - get from Zoom Marketplace > Your App > SDK Credentials
