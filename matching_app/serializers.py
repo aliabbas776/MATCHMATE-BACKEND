@@ -1382,13 +1382,21 @@ class SessionStartSerializer(serializers.Serializer):
         # We create the Google Meet using the participant's Google account (participant = host/owner),
         # so the participant must have authorized Google Calendar first.
         from matching_app.models import GoogleOAuthToken
-        if not GoogleOAuthToken.objects.filter(user=session.participant).exists():
+        participant_has_token = GoogleOAuthToken.objects.filter(user=session.participant).exists()
+        if not participant_has_token:
             raise serializers.ValidationError(
                 {
                     'google_calendar': (
-                        "Participant has not authorized Google Calendar. "
-                        "Participant must authorize by visiting /api/google/login/ (logged in as the participant)."
-                    )
+                        f"Participant '{session.participant.username}' (ID: {session.participant.id}) has not authorized Google Calendar. "
+                        f"Participant must authorize by: "
+                        f"1. Making a GET request to /api/google/login/ with Bearer token (logged in as participant '{session.participant.username}'), "
+                        f"2. Opening the returned 'auth_url' in a browser to complete OAuth, "
+                        f"3. Waiting for redirect to /oauth/callback/ which saves the token."
+                    ),
+                    'participant_id': session.participant.id,
+                    'participant_username': session.participant.username,
+                    'request_user_id': request_user.id,
+                    'request_user_username': request_user.username,
                 }
             )
 
@@ -1427,9 +1435,14 @@ class SessionStartSerializer(serializers.Serializer):
             raise serializers.ValidationError(
                 {
                     'google_calendar': (
-                        f"Participant '{session.participant.username}' has not authorized Google Calendar. "
-                        "Participant must authorize by visiting /api/google/login/ (logged in as the participant)."
-                    )
+                        f"Participant '{session.participant.username}' (ID: {session.participant.id}) has not authorized Google Calendar. "
+                        f"Participant must authorize by: "
+                        f"1. Making a GET request to /api/google/login/ with Bearer token (logged in as participant '{session.participant.username}'), "
+                        f"2. Opening the returned 'auth_url' in a browser to complete OAuth, "
+                        f"3. Waiting for redirect to /oauth/callback/ which saves the token."
+                    ),
+                    'participant_id': session.participant.id,
+                    'participant_username': session.participant.username,
                 }
             )
         

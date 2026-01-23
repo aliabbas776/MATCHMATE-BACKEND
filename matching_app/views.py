@@ -1846,11 +1846,15 @@ class GoogleLoginView(APIView):
     
     def get(self, request):
         credentials_path = settings.BASE_DIR / 'client_secret_90144230544-0fpt13jenpce2hdb7lhhvd89bf3dfa73.apps.googleusercontent.com.json'
+        
+        # Build redirect URI dynamically based on the request
+        # Use request.build_absolute_uri() to get the full URL including protocol and host
+        redirect_uri = request.build_absolute_uri('/oauth/callback/')
 
         flow = Flow.from_client_secrets_file(
             credentials_path,
             scopes=['https://www.googleapis.com/auth/calendar.events'],
-            redirect_uri='http://localhost:8000/oauth/callback/'
+            redirect_uri=redirect_uri
         )
 
         # Encode the user ID in the OAuth "state" parameter so the callback
@@ -1902,11 +1906,15 @@ def google_callback(request):
     
     credentials_path = settings.BASE_DIR / 'client_secret_90144230544-0fpt13jenpce2hdb7lhhvd89bf3dfa73.apps.googleusercontent.com.json'
     creds_data = _get_google_credentials_from_file()
+    
+    # Build redirect URI dynamically based on the request
+    # Use request.build_absolute_uri() to get the full URL including protocol and host
+    redirect_uri = request.build_absolute_uri('/oauth/callback/')
 
     flow = Flow.from_client_secrets_file(
         credentials_path,
         scopes=['https://www.googleapis.com/auth/calendar.events'],
-        redirect_uri='http://localhost:8000/oauth/callback/'
+        redirect_uri=redirect_uri
     )
 
     flow.fetch_token(code=code)
