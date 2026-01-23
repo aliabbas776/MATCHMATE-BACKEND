@@ -13,10 +13,6 @@ from rest_framework.pagination import PageNumberPagination
 
 from django.shortcuts import redirect
 from django.http import JsonResponse
-from google_auth_oauthlib.flow import Flow
-from googleapiclient.discovery import build
-from google.oauth2.credentials import Credentials
-from google.auth.transport.requests import Request
 from django.conf import settings
 import json
 from datetime import datetime, timedelta
@@ -1791,6 +1787,13 @@ class SupportRequestView(APIView):
 
 def _get_google_credentials_from_file():
     """Load Google OAuth client credentials from JSON file."""
+    try:
+        from google_auth_oauthlib.flow import Flow
+    except ImportError:
+        raise ImportError(
+            'Google OAuth libraries are not installed. '
+            'Install them with: pip install google-auth-oauthlib google-auth-httplib2 google-api-python-client'
+        )
     credentials_path = settings.BASE_DIR / 'client_secret_90144230544-0fpt13jenpce2hdb7lhhvd89bf3dfa73.apps.googleusercontent.com.json'
     with open(credentials_path, 'r') as f:
         creds_data = json.load(f)
@@ -1802,6 +1805,15 @@ def _get_or_refresh_user_credentials(user):
     Get valid Google OAuth credentials for a user, refreshing if necessary.
     Returns Credentials object or None if user hasn't authorized.
     """
+    try:
+        from google.oauth2.credentials import Credentials
+        from google.auth.transport.requests import Request
+    except ImportError:
+        raise ImportError(
+            'Google OAuth libraries are not installed. '
+            'Install them with: pip install google-auth-oauthlib google-auth-httplib2 google-api-python-client'
+        )
+    
     try:
         oauth_token = GoogleOAuthToken.objects.get(user=user)
     except GoogleOAuthToken.DoesNotExist:
@@ -1845,12 +1857,58 @@ class GoogleLoginView(APIView):
     permission_classes = [IsAuthenticated]
     
     def get(self, request):
+        import re
         credentials_path = settings.BASE_DIR / 'client_secret_90144230544-0fpt13jenpce2hdb7lhhvd89bf3dfa73.apps.googleusercontent.com.json'
         
-        # Build redirect URI dynamically based on the request
-        # Use request.build_absolute_uri() to get the full URL including protocol and host
-        redirect_uri = request.build_absolute_uri('/oauth/callback/')
+        # Build redirect URI - use configured base URL if set, otherwise use request
+        if hasattr(settings, 'GOOGLE_OAUTH_REDIRECT_BASE_URL') and settings.GOOGLE_OAUTH_REDIRECT_BASE_URL:
+            redirect_uri = f"{settings.GOOGLE_OAUTH_REDIRECT_BASE_URL.rstrip('/')}/oauth/callback/"
+        else:
+            # Use request.build_absolute_uri() to get the full URL including protocol and host
+            redirect_uri = request.build_absolute_uri('/oauth/callback/')
 
+        # Check if redirect URI uses an IP address (Google doesn't allow IPs)
+        # Extract host from redirect_uri
+        from urllib.parse import urlparse
+        parsed = urlparse(redirect_uri)
+        host = parsed.netloc.split(':')[0]  # Remove port if present
+        
+        # Check if host is an IP address
+        ip_pattern = re.compile(r'^(\d{1,3}\.){3}\d{1,3}$')
+        is_ip_address = ip_pattern.match(host) is not None
+        
+        if is_ip_address and host not in ['localhost', '127.0.0.1']:
+            return JsonResponse(
+                {
+                    'error': 'Invalid redirect URI configuration',
+                    'redirect_uri': redirect_uri,
+                    'issue': (
+                        'Google OAuth does not allow IP addresses as redirect URIs. '
+                        'You must use a domain name (e.g., example.com) instead of an IP address.'
+                    ),
+                    'solutions': [
+                        '1. Set up a domain name and point it to your server IP (44.220.158.223)',
+                        '2. Add the domain redirect URI to Google Cloud Console (e.g., http://yourdomain.com/oauth/callback/)',
+                        '3. Configure GOOGLE_OAUTH_REDIRECT_BASE_URL in settings.py to use your domain',
+                        '4. For testing, use localhost: http://localhost:8000/oauth/callback/ (already configured)',
+                        '5. Alternative: Use a service like ngrok for temporary testing (not recommended for production)'
+                    ],
+                    'current_host': host,
+                },
+                status=400
+            )
+
+        try:
+            from google_auth_oauthlib.flow import Flow
+        except ImportError:
+            return JsonResponse(
+                {
+                    'error': 'Google OAuth libraries not installed',
+                    'message': 'Please install required packages: pip install google-auth-oauthlib google-auth-httplib2 google-api-python-client'
+                },
+                status=500
+            )
+        
         flow = Flow.from_client_secrets_file(
             credentials_path,
             scopes=['https://www.googleapis.com/auth/calendar.events'],
@@ -1868,10 +1926,17 @@ class GoogleLoginView(APIView):
         )
         # Return the Google OAuth URL as JSON so clients (Postman / mobile apps)
         # can open it in a browser to complete consent.
+        # Include redirect_uri in response for debugging/verification
         return JsonResponse(
             {
                 'success': True,
                 'auth_url': auth_url,
+                'redirect_uri': redirect_uri,  # Include for verification
+                'instructions': (
+                    'IMPORTANT: Make sure this redirect_uri is registered in Google Cloud Console. '
+                    'Go to: APIs & Services > Credentials > Your OAuth 2.0 Client > Authorized redirect URIs. '
+                    'Note: Google does not allow IP addresses - you must use a domain name.'
+                )
             }
         )
 
@@ -1907,10 +1972,24 @@ def google_callback(request):
     credentials_path = settings.BASE_DIR / 'client_secret_90144230544-0fpt13jenpce2hdb7lhhvd89bf3dfa73.apps.googleusercontent.com.json'
     creds_data = _get_google_credentials_from_file()
     
-    # Build redirect URI dynamically based on the request
-    # Use request.build_absolute_uri() to get the full URL including protocol and host
-    redirect_uri = request.build_absolute_uri('/oauth/callback/')
+    # Build redirect URI - use configured base URL if set, otherwise use request
+    if hasattr(settings, 'GOOGLE_OAUTH_REDIRECT_BASE_URL') and settings.GOOGLE_OAUTH_REDIRECT_BASE_URL:
+        redirect_uri = f"{settings.GOOGLE_OAUTH_REDIRECT_BASE_URL.rstrip('/')}/oauth/callback/"
+    else:
+        # Use request.build_absolute_uri() to get the full URL including protocol and host
+        redirect_uri = request.build_absolute_uri('/oauth/callback/')
 
+    try:
+        from google_auth_oauthlib.flow import Flow
+    except ImportError:
+        return JsonResponse(
+            {
+                'error': 'Google OAuth libraries not installed',
+                'message': 'Please install required packages: pip install google-auth-oauthlib google-auth-httplib2 google-api-python-client'
+            },
+            status=500
+        )
+    
     flow = Flow.from_client_secrets_file(
         credentials_path,
         scopes=['https://www.googleapis.com/auth/calendar.events'],
@@ -2000,7 +2079,18 @@ class CreateGoogleMeetView(APIView):
             )
         
         try:
-            # Build Calendar service
+            from googleapiclient.discovery import build
+        except ImportError:
+            return Response(
+                {
+                    'error': 'Google API client library not installed',
+                    'message': 'Please install required packages: pip install google-auth-oauthlib google-auth-httplib2 google-api-python-client'
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+        
+        # Build Calendar service
+        try:
             service = build('calendar', 'v3', credentials=credentials)
             
             # Create event with Google Meet

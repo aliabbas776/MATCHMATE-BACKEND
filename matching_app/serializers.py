@@ -1054,17 +1054,28 @@ class MessageSerializer(serializers.ModelSerializer):
     """Serializer for individual messages."""
     sender = MessageUserSerializer(read_only=True)
     receiver = MessageUserSerializer(read_only=True)
+    media_file_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Message
-        fields = ['id', 'sender', 'receiver', 'content', 'is_read', 'created_at']
+        fields = ['id', 'sender', 'receiver', 'content', 'media_file', 'media_file_url', 'is_read', 'created_at']
         read_only_fields = ['id', 'sender', 'receiver', 'is_read', 'created_at']
+
+    def get_media_file_url(self, obj):
+        """Return the full URL for the media file if it exists."""
+        if obj.media_file:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.media_file.url)
+            return obj.media_file.url
+        return None
 
 
 class MessageCreateSerializer(serializers.Serializer):
     """Serializer for creating a new message."""
     receiver_id = serializers.IntegerField()
-    content = serializers.CharField(required=True, max_length=5000)
+    content = serializers.CharField(required=False, allow_blank=True, max_length=5000)
+    media_file = serializers.FileField(required=False, allow_null=True)
 
     def validate_receiver_id(self, value):
         """Validate that the receiver exists and is active."""
@@ -1120,6 +1131,19 @@ class MessageCreateSerializer(serializers.Serializer):
             raise serializers.ValidationError(
                 {'receiver_id': 'You cannot message this user unless you are friends.'}
             )
+
+        # Validate that at least content or media_file is provided
+        content = attrs.get('content', '').strip() if attrs.get('content') else ''
+        media_file = attrs.get('media_file')
+        
+        # Allow empty content if media_file is provided, but require at least one
+        if not content and not media_file:
+            raise serializers.ValidationError(
+                {'non_field_errors': 'Either content or media_file must be provided.'}
+            )
+        
+        # Update attrs with cleaned content (empty string if None)
+        attrs['content'] = content if content else ''
 
         attrs['receiver'] = receiver
         attrs['sender'] = request_user

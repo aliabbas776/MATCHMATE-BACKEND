@@ -621,6 +621,12 @@ class Message(models.Model):
         related_name='messages_received',
     )
     content = models.TextField()
+    media_file = models.FileField(
+        upload_to='messages/media/%Y/%m/%d/',
+        blank=True,
+        null=True,
+        help_text='Media file attached to the message (image, video, audio, document, etc.)'
+    )
     is_read = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
