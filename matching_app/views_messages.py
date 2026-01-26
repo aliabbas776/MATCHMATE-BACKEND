@@ -41,7 +41,12 @@ class MessageBaseView(APIView):
 
 
 class SendMessageView(MessageBaseView):
-    """Endpoint for sending a message to an approved friend."""
+    """
+    Endpoint for sending a message to an approved friend.
+    Supports text messages, images, and videos.
+    - Images: JPEG, PNG, GIF, WebP, BMP, TIFF (max 10MB)
+    - Videos: MP4, MOV, AVI, WebM, 3GP, MKV (max 100MB)
+    """
     parser_classes = [MultiPartParser, FormParser, JSONParser]
     
     def post(self, request):

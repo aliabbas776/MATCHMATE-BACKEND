@@ -625,7 +625,7 @@ class Message(models.Model):
         upload_to='messages/media/%Y/%m/%d/',
         blank=True,
         null=True,
-        help_text='Media file attached to the message (image, video, audio, document, etc.)'
+        help_text='Media file attached to the message (image or video). Supported formats: Images (JPEG, PNG, GIF, WebP, BMP, TIFF) up to 10MB, Videos (MP4, MOV, AVI, WebM, 3GP, MKV) up to 100MB.'
     )
     is_read = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)

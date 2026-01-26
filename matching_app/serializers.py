@@ -1,4 +1,5 @@
 import json
+import mimetypes
 import secrets
 from collections import OrderedDict
 from collections.abc import Mapping
@@ -1055,10 +1056,11 @@ class MessageSerializer(serializers.ModelSerializer):
     sender = MessageUserSerializer(read_only=True)
     receiver = MessageUserSerializer(read_only=True)
     media_file_url = serializers.SerializerMethodField()
+    media_type = serializers.SerializerMethodField()
 
     class Meta:
         model = Message
-        fields = ['id', 'sender', 'receiver', 'content', 'media_file', 'media_file_url', 'is_read', 'created_at']
+        fields = ['id', 'sender', 'receiver', 'content', 'media_file', 'media_file_url', 'media_type', 'is_read', 'created_at']
         read_only_fields = ['id', 'sender', 'receiver', 'is_read', 'created_at']
 
     def get_media_file_url(self, obj):
@@ -1070,12 +1072,97 @@ class MessageSerializer(serializers.ModelSerializer):
             return obj.media_file.url
         return None
 
+    def get_media_type(self, obj):
+        """Return the type of media file (image or video) if it exists."""
+        if not obj.media_file:
+            return None
+        
+        # Get MIME type from file name
+        mime_type, _ = mimetypes.guess_type(obj.media_file.name)
+        
+        # If MIME type detection fails, try to infer from extension
+        if not mime_type:
+            ext = obj.media_file.name.lower().split('.')[-1] if '.' in obj.media_file.name else ''
+            image_extensions = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'tiff']
+            video_extensions = ['mp4', 'mpeg', 'mov', 'avi', 'webm', '3gp', 'mkv']
+            
+            if ext in image_extensions:
+                return 'image'
+            elif ext in video_extensions:
+                return 'video'
+            return None
+        
+        # Determine type from MIME type
+        if mime_type.startswith('image/'):
+            return 'image'
+        elif mime_type.startswith('video/'):
+            return 'video'
+        
+        return None
+
 
 class MessageCreateSerializer(serializers.Serializer):
     """Serializer for creating a new message."""
     receiver_id = serializers.IntegerField()
     content = serializers.CharField(required=False, allow_blank=True, max_length=5000)
     media_file = serializers.FileField(required=False, allow_null=True)
+
+    # Allowed file types for messages
+    ALLOWED_IMAGE_TYPES = [
+        'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 
+        'image/webp', 'image/bmp', 'image/tiff'
+    ]
+    ALLOWED_VIDEO_TYPES = [
+        'video/mp4', 'video/mpeg', 'video/quicktime', 'video/x-msvideo',
+        'video/webm', 'video/3gpp', 'video/x-matroska', 'video/avi'
+    ]
+    MAX_IMAGE_SIZE = 10 * 1024 * 1024  # 10 MB
+    MAX_VIDEO_SIZE = 100 * 1024 * 1024  # 100 MB
+
+    def validate_media_file(self, value):
+        """Validate that the uploaded file is an image or video within size limits."""
+        if not value:
+            return value
+        
+        # Get file size
+        file_size = value.size
+        
+        # Get MIME type from file
+        mime_type, _ = mimetypes.guess_type(value.name)
+        
+        # If MIME type detection fails, try to infer from extension
+        if not mime_type:
+            ext = value.name.lower().split('.')[-1] if '.' in value.name else ''
+            ext_to_mime = {
+                'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png',
+                'gif': 'image/gif', 'webp': 'image/webp', 'bmp': 'image/bmp',
+                'tiff': 'image/tiff', 'mp4': 'video/mp4', 'mpeg': 'video/mpeg',
+                'mov': 'video/quicktime', 'avi': 'video/x-msvideo', 'webm': 'video/webm',
+                '3gp': 'video/3gpp', 'mkv': 'video/x-matroska'
+            }
+            mime_type = ext_to_mime.get(ext)
+        
+        # Check if it's an image
+        if mime_type in self.ALLOWED_IMAGE_TYPES:
+            if file_size > self.MAX_IMAGE_SIZE:
+                raise serializers.ValidationError(
+                    f'Image file size exceeds the maximum allowed size of {self.MAX_IMAGE_SIZE / (1024 * 1024):.0f} MB.'
+                )
+            return value
+        
+        # Check if it's a video
+        if mime_type in self.ALLOWED_VIDEO_TYPES:
+            if file_size > self.MAX_VIDEO_SIZE:
+                raise serializers.ValidationError(
+                    f'Video file size exceeds the maximum allowed size of {self.MAX_VIDEO_SIZE / (1024 * 1024):.0f} MB.'
+                )
+            return value
+        
+        # If neither image nor video, reject
+        raise serializers.ValidationError(
+            'File type not supported. Please upload an image (JPEG, PNG, GIF, WebP, BMP, TIFF) '
+            'or video (MP4, MOV, AVI, WebM, 3GP, MKV).'
+        )
 
     def validate_receiver_id(self, value):
         """Validate that the receiver exists and is active."""
