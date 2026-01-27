@@ -342,11 +342,43 @@ class LoginView(APIView):
         profile = get_or_create_user_profile(user)
         has_profile = bool(profile and profile.is_completed)
 
+        # Optionally include Google OAuth authorization URL in the login response
+        # so the frontend can immediately open it in a browser/webview and the
+        # user can authorize Google Calendar/Meet as part of the login flow.
+        google_oauth_payload = None
+        try:
+            has_google_token = GoogleOAuthToken.objects.filter(user=user).exists()
+        except Exception:
+            has_google_token = True  # fail-safe: don't break login if something goes wrong
+
+        if not has_google_token:
+            try:
+                oauth_result = build_google_oauth_authorization_url(request, user)
+
+                # Only attach a payload if we successfully built an auth URL
+                if oauth_result.get('success'):
+                    google_oauth_payload = {
+                        'auth_url': oauth_result.get('auth_url'),
+                        'redirect_uri': oauth_result.get('redirect_uri'),
+                        'instructions': oauth_result.get('instructions'),
+                    }
+                # If there is a config or library issue, we still keep login successful,
+                # but we expose minimal info so the frontend can optionally show it.
+                elif oauth_result.get('invalid_redirect') or oauth_result.get('error'):
+                    google_oauth_payload = {
+                        'error': oauth_result.get('error'),
+                        'redirect_uri': oauth_result.get('redirect_uri'),
+                    }
+            except Exception:
+                # Do not fail login because of Google OAuth helper issues
+                google_oauth_payload = None
+
         return Response(
             {
                 'success': True,
                 'token': str(refresh.access_token),
                 'hasProfile': has_profile,
+                'google_oauth': google_oauth_payload,
             },
             status=status.HTTP_200_OK,
         )
@@ -1848,6 +1880,86 @@ def _get_or_refresh_user_credentials(user):
     return credentials
 
 
+def build_google_oauth_authorization_url(request, user_for_state):
+    """
+    Reusable helper to build the Google OAuth authorization URL for a given user.
+    Encodes the provided user's id into the OAuth "state" parameter so that the
+    callback can associate the authorization with the correct user.
+    """
+    import re
+    from urllib.parse import urlparse
+
+    credentials_path = settings.BASE_DIR / 'client_secret_90144230544-0fpt13jenpce2hdb7lhhvd89bf3dfa73.apps.googleusercontent.com.json'
+
+    # Build redirect URI - use configured base URL if set, otherwise use request
+    if hasattr(settings, 'GOOGLE_OAUTH_REDIRECT_BASE_URL') and settings.GOOGLE_OAUTH_REDIRECT_BASE_URL:
+        redirect_uri = f"{settings.GOOGLE_OAUTH_REDIRECT_BASE_URL.rstrip('/')}/oauth/callback/"
+    else:
+        # Use request.build_absolute_uri() to get the full URL including protocol and host
+        redirect_uri = request.build_absolute_uri('/oauth/callback/')
+
+    # Check if redirect URI uses an IP address (Google doesn't allow IPs)
+    parsed = urlparse(redirect_uri)
+    host = parsed.netloc.split(':')[0]  # Remove port if present
+
+    # Check if host is an IP address
+    ip_pattern = re.compile(r'^(\d{1,3}\.){3}\d{1,3}$')
+    is_ip_address = ip_pattern.match(host) is not None
+
+    if is_ip_address and host not in ['localhost', '127.0.0.1']:
+        return {
+            'error': 'Invalid redirect URI configuration',
+            'redirect_uri': redirect_uri,
+            'issue': (
+                'Google OAuth does not allow IP addresses as redirect URIs. '
+                'You must use a domain name (e.g., example.com) instead of an IP address.'
+            ),
+            'solutions': [
+                '1. Set up a domain name and point it to your server IP (44.220.158.223)',
+                '2. Add the domain redirect URI to Google Cloud Console (e.g., http://yourdomain.com/oauth/callback/)',
+                '3. Configure GOOGLE_OAUTH_REDIRECT_BASE_URL in settings.py to use your domain',
+                '4. For testing, use localhost: http://localhost:8000/oauth/callback/ (already configured)',
+                '5. Alternative: Use a service like ngrok for temporary testing (not recommended for production)'
+            ],
+            'current_host': host,
+            'invalid_redirect': True,
+        }
+
+    try:
+        from google_auth_oauthlib.flow import Flow
+    except ImportError:
+        return {
+            'error': 'Google OAuth libraries not installed',
+            'message': 'Please install required packages: pip install google-auth-oauthlib google-auth-httplib2 google-api-python-client',
+            'invalid_redirect': False,
+        }
+
+    flow = Flow.from_client_secrets_file(
+        credentials_path,
+        scopes=['https://www.googleapis.com/auth/calendar.events'],
+        redirect_uri=redirect_uri
+    )
+
+    auth_url, state = flow.authorization_url(
+        prompt='consent',
+        access_type='offline',
+        include_granted_scopes='true',
+        state=str(user_for_state.id),
+    )
+
+    return {
+        'success': True,
+        'auth_url': auth_url,
+        'redirect_uri': redirect_uri,
+        'instructions': (
+            'IMPORTANT: Make sure this redirect_uri is registered in Google Cloud Console. '
+            'Go to: APIs & Services > Credentials > Your OAuth 2.0 Client > Authorized redirect URIs. '
+            'Note: Google does not allow IP addresses - you must use a domain name.'
+        ),
+        'invalid_redirect': False,
+    }
+
+
 class GoogleLoginView(APIView):
     """
     Initiate Google OAuth2 flow for Calendar/Meet.
@@ -1857,88 +1969,15 @@ class GoogleLoginView(APIView):
     permission_classes = [IsAuthenticated]
     
     def get(self, request):
-        import re
-        credentials_path = settings.BASE_DIR / 'client_secret_90144230544-0fpt13jenpce2hdb7lhhvd89bf3dfa73.apps.googleusercontent.com.json'
-        
-        # Build redirect URI - use configured base URL if set, otherwise use request
-        if hasattr(settings, 'GOOGLE_OAUTH_REDIRECT_BASE_URL') and settings.GOOGLE_OAUTH_REDIRECT_BASE_URL:
-            redirect_uri = f"{settings.GOOGLE_OAUTH_REDIRECT_BASE_URL.rstrip('/')}/oauth/callback/"
-        else:
-            # Use request.build_absolute_uri() to get the full URL including protocol and host
-            redirect_uri = request.build_absolute_uri('/oauth/callback/')
+        result = build_google_oauth_authorization_url(request, request.user)
 
-        # Check if redirect URI uses an IP address (Google doesn't allow IPs)
-        # Extract host from redirect_uri
-        from urllib.parse import urlparse
-        parsed = urlparse(redirect_uri)
-        host = parsed.netloc.split(':')[0]  # Remove port if present
-        
-        # Check if host is an IP address
-        ip_pattern = re.compile(r'^(\d{1,3}\.){3}\d{1,3}$')
-        is_ip_address = ip_pattern.match(host) is not None
-        
-        if is_ip_address and host not in ['localhost', '127.0.0.1']:
-            return JsonResponse(
-                {
-                    'error': 'Invalid redirect URI configuration',
-                    'redirect_uri': redirect_uri,
-                    'issue': (
-                        'Google OAuth does not allow IP addresses as redirect URIs. '
-                        'You must use a domain name (e.g., example.com) instead of an IP address.'
-                    ),
-                    'solutions': [
-                        '1. Set up a domain name and point it to your server IP (44.220.158.223)',
-                        '2. Add the domain redirect URI to Google Cloud Console (e.g., http://yourdomain.com/oauth/callback/)',
-                        '3. Configure GOOGLE_OAUTH_REDIRECT_BASE_URL in settings.py to use your domain',
-                        '4. For testing, use localhost: http://localhost:8000/oauth/callback/ (already configured)',
-                        '5. Alternative: Use a service like ngrok for temporary testing (not recommended for production)'
-                    ],
-                    'current_host': host,
-                },
-                status=400
-            )
+        # If there was a redirect configuration or library issue, return appropriate status
+        if result.get('invalid_redirect'):
+            return JsonResponse(result, status=400)
+        if result.get('error') and not result.get('invalid_redirect', False):
+            return JsonResponse(result, status=500)
 
-        try:
-            from google_auth_oauthlib.flow import Flow
-        except ImportError:
-            return JsonResponse(
-                {
-                    'error': 'Google OAuth libraries not installed',
-                    'message': 'Please install required packages: pip install google-auth-oauthlib google-auth-httplib2 google-api-python-client'
-                },
-                status=500
-            )
-        
-        flow = Flow.from_client_secrets_file(
-            credentials_path,
-            scopes=['https://www.googleapis.com/auth/calendar.events'],
-            redirect_uri=redirect_uri
-        )
-
-        # Encode the user ID in the OAuth "state" parameter so the callback
-        # can associate the Google authorization with the correct user,
-        # without relying on Django session cookies shared between Postman and browser.
-        auth_url, state = flow.authorization_url(
-            prompt='consent',
-            access_type='offline',
-            include_granted_scopes='true',
-            state=str(request.user.id),
-        )
-        # Return the Google OAuth URL as JSON so clients (Postman / mobile apps)
-        # can open it in a browser to complete consent.
-        # Include redirect_uri in response for debugging/verification
-        return JsonResponse(
-            {
-                'success': True,
-                'auth_url': auth_url,
-                'redirect_uri': redirect_uri,  # Include for verification
-                'instructions': (
-                    'IMPORTANT: Make sure this redirect_uri is registered in Google Cloud Console. '
-                    'Go to: APIs & Services > Credentials > Your OAuth 2.0 Client > Authorized redirect URIs. '
-                    'Note: Google does not allow IP addresses - you must use a domain name.'
-                )
-            }
-        )
+        return JsonResponse(result)
 
 
 def google_callback(request):

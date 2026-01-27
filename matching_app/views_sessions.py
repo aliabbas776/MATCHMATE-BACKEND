@@ -8,6 +8,7 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
 from .models import Message, Session, SubscriptionPlan, UserConnection, UserSubscription
+from .views import build_google_oauth_authorization_url
 
 
 def get_or_create_user_subscription(user):
@@ -131,6 +132,51 @@ class CreateSessionView(SessionBaseView):
 class StartSessionView(SessionBaseView):
     """Endpoint for starting a session (generating Zoom link)."""
     def post(self, request, session_id):
+        # Before delegating to the serializer, ensure the participant has
+        # authorized Google Calendar. If not, build the Google OAuth URL
+        # here and return it so the client can complete authorization
+        # using this same endpoint (no need to hit /api/google/login/).
+        try:
+            session = Session.objects.select_related('participant', 'initiator').get(id=session_id)
+        except Session.DoesNotExist:
+            return Response(
+                {'error': f'Session with ID {session_id} does not exist.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        from matching_app.models import GoogleOAuthToken
+        participant = session.participant
+
+        if not GoogleOAuthToken.objects.filter(user=participant).exists():
+            oauth_result = build_google_oauth_authorization_url(request, participant)
+
+            # If redirect configuration is invalid
+            if oauth_result.get('invalid_redirect'):
+                return Response(oauth_result, status=status.HTTP_400_BAD_REQUEST)
+
+            # If Google libraries are missing or another error occurred
+            if oauth_result.get('error') and not oauth_result.get('invalid_redirect', False):
+                return Response(oauth_result, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+            # Return the auth_url from here so the client can handle both
+            # starting the session and initiating Google auth via this API.
+            return Response(
+                {
+                    'error': 'Google Calendar not authorized for session participant.',
+                    'detail': (
+                        f"Participant '{participant.username}' (ID: {participant.id}) must authorize Google Calendar."
+                    ),
+                    'participant_id': participant.id,
+                    'participant_username': participant.username,
+                    'google_oauth': {
+                        'auth_url': oauth_result.get('auth_url'),
+                        'redirect_uri': oauth_result.get('redirect_uri'),
+                        'instructions': oauth_result.get('instructions'),
+                    },
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         serializer = SessionStartSerializer(
             data={'session_id': session_id},
             context={'request': request},
