@@ -7,13 +7,14 @@ from django.contrib.auth import get_user_model
 from django.db import models
 from django.utils import timezone
 from rest_framework import status
-from rest_framework.permissions import IsAuthenticated, IsAdminUser
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework.pagination import PageNumberPagination
 
 from .models import UserProfile
+from .permissions import IsStaffOrSuperuser
 from .serializers import UserProfileListSerializer
 
 User = get_user_model()
@@ -36,7 +37,7 @@ class AdminProfileVerifyView(APIView):
     This allows the profile to reach 100% completion.
     """
     authentication_classes = [JWTAuthentication]
-    permission_classes = [IsAuthenticated, IsAdminUser]
+    permission_classes = [IsAuthenticated, IsStaffOrSuperuser]
     
     def post(self, request, profile_id):
         try:
@@ -84,7 +85,7 @@ class AdminProfileRejectView(APIView):
     Sets admin_verification_status to 'rejected'.
     """
     authentication_classes = [JWTAuthentication]
-    permission_classes = [IsAuthenticated, IsAdminUser]
+    permission_classes = [IsAuthenticated, IsStaffOrSuperuser]
     
     def post(self, request, profile_id):
         try:
@@ -133,7 +134,7 @@ class AdminProfileResetVerificationView(APIView):
     Sets admin_verification_status back to 'pending'.
     """
     authentication_classes = [JWTAuthentication]
-    permission_classes = [IsAuthenticated, IsAdminUser]
+    permission_classes = [IsAuthenticated, IsStaffOrSuperuser]
     
     def post(self, request, profile_id):
         try:
@@ -180,7 +181,7 @@ class AdminProfilesPendingListView(APIView):
     - search: Search by username, email, candidate_name
     """
     authentication_classes = [JWTAuthentication]
-    permission_classes = [IsAuthenticated, IsAdminUser]
+    permission_classes = [IsAuthenticated, IsStaffOrSuperuser]
     pagination_class = AdminProfilePagination
     
     def get(self, request):
@@ -219,7 +220,7 @@ class AdminProfilesVerifiedListView(APIView):
     GET /api/admin/profiles/verified/
     """
     authentication_classes = [JWTAuthentication]
-    permission_classes = [IsAuthenticated, IsAdminUser]
+    permission_classes = [IsAuthenticated, IsStaffOrSuperuser]
     pagination_class = AdminProfilePagination
     
     def get(self, request):
@@ -256,7 +257,7 @@ class AdminProfilesRejectedListView(APIView):
     GET /api/admin/profiles/rejected/
     """
     authentication_classes = [JWTAuthentication]
-    permission_classes = [IsAuthenticated, IsAdminUser]
+    permission_classes = [IsAuthenticated, IsStaffOrSuperuser]
     pagination_class = AdminProfilePagination
     
     def get(self, request):
@@ -293,7 +294,7 @@ class AdminProfileDetailView(APIView):
     GET /api/admin/profiles/{profile_id}/
     """
     authentication_classes = [JWTAuthentication]
-    permission_classes = [IsAuthenticated, IsAdminUser]
+    permission_classes = [IsAuthenticated, IsStaffOrSuperuser]
     
     def get(self, request, profile_id):
         try:
@@ -318,7 +319,7 @@ class AdminDashboardStatsView(APIView):
     GET /api/admin/dashboard/stats/
     """
     authentication_classes = [JWTAuthentication]
-    permission_classes = [IsAuthenticated, IsAdminUser]
+    permission_classes = [IsAuthenticated, IsStaffOrSuperuser]
     
     def get(self, request):
         from django.db.models import Count

@@ -39,6 +39,23 @@ class IsAdminOrReadOwnProfile(permissions.BasePermission):
 
 
 
+class IsStaffOrSuperuser(permissions.BasePermission):
+    """
+    Permission class that allows access only to staff or superuser.
+    Used for admin-only endpoints.
+    
+    Checks both is_staff and is_superuser to ensure either type of admin can access.
+    """
+    
+    def has_permission(self, request, view):
+        # User must be authenticated
+        if not request.user or not request.user.is_authenticated:
+            return False
+        
+        # Check if user is staff OR superuser
+        return request.user.is_staff or request.user.is_superuser
+
+
 class ReportPermission(permissions.BasePermission):
     """
     Permission class for Report management:
