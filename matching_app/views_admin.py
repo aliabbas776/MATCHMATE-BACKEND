@@ -287,6 +287,102 @@ class AdminProfilesRejectedListView(APIView):
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 
+class AdminProfilesAllListView(APIView):
+    """
+    Admin endpoint to list ALL user profiles with filtering and search.
+    
+    GET /api/admin/profiles/all/
+    
+    Query params:
+    - page: Page number (default: 1)
+    - page_size: Results per page (default: 20, max: 100)
+    - search: Search by username, email, candidate_name, phone_number, city
+    - admin_verification_status: Filter by verification status (pending/verified/rejected)
+    - gender: Filter by gender
+    - country: Filter by country
+    - city: Filter by city
+    - is_public: Filter by public/private profiles (true/false)
+    - is_disabled: Filter by disabled profiles (true/false)
+    - cnic_verification_status: Filter by CNIC status (unverified/pending/verified/rejected)
+    """
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated, IsStaffOrSuperuser]
+    pagination_class = AdminProfilePagination
+    
+    def get(self, request):
+        from django.db.models import Q
+        
+        # Start with all profiles
+        queryset = UserProfile.objects.select_related('user').order_by('-created_at')
+        
+        # Search functionality
+        search = request.query_params.get('search', '').strip()
+        if search:
+            queryset = queryset.filter(
+                Q(user__username__icontains=search) |
+                Q(user__email__icontains=search) |
+                Q(candidate_name__icontains=search) |
+                Q(phone_number__icontains=search) |
+                Q(city__icontains=search)
+            )
+        
+        # Filter by admin verification status
+        admin_verification_status = request.query_params.get('admin_verification_status', '').strip().lower()
+        if admin_verification_status in ['pending', 'verified', 'rejected']:
+            queryset = queryset.filter(admin_verification_status=admin_verification_status)
+        
+        # Filter by gender
+        gender = request.query_params.get('gender', '').strip()
+        if gender:
+            queryset = queryset.filter(gender__iexact=gender)
+        
+        # Filter by country
+        country = request.query_params.get('country', '').strip()
+        if country:
+            queryset = queryset.filter(country__icontains=country)
+        
+        # Filter by city
+        city = request.query_params.get('city', '').strip()
+        if city:
+            queryset = queryset.filter(city__icontains=city)
+        
+        # Filter by is_public
+        is_public = request.query_params.get('is_public', '').strip().lower()
+        if is_public == 'true':
+            queryset = queryset.filter(is_public=True)
+        elif is_public == 'false':
+            queryset = queryset.filter(is_public=False)
+        
+        # Filter by is_disabled
+        is_disabled = request.query_params.get('is_disabled', '').strip().lower()
+        if is_disabled == 'true':
+            queryset = queryset.filter(is_disabled=True)
+        elif is_disabled == 'false':
+            queryset = queryset.filter(is_disabled=False)
+        
+        # Filter by CNIC verification status
+        cnic_status = request.query_params.get('cnic_verification_status', '').strip().lower()
+        if cnic_status in ['unverified', 'pending', 'verified', 'rejected']:
+            queryset = queryset.filter(cnic_verification_status=cnic_status)
+        
+        # Filter by marital status
+        marital_status = request.query_params.get('marital_status', '').strip()
+        if marital_status:
+            queryset = queryset.filter(marital_status__iexact=marital_status)
+        
+        # Paginate
+        paginator = self.pagination_class()
+        page = paginator.paginate_queryset(queryset, request)
+        
+        if page is not None:
+            serializer = UserProfileListSerializer(page, many=True, context={'request': request})
+            return paginator.get_paginated_response(serializer.data)
+        
+        # Fallback without pagination
+        serializer = UserProfileListSerializer(queryset, many=True, context={'request': request})
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
 class AdminProfileDetailView(APIView):
     """
     Admin endpoint to get detailed profile information.

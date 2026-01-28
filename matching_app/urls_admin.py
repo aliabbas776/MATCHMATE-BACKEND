@@ -10,6 +10,7 @@ from .views_admin import (
     AdminProfileDetailView,
     AdminProfileRejectView,
     AdminProfileResetVerificationView,
+    AdminProfilesAllListView,
     AdminProfilesPendingListView,
     AdminProfilesRejectedListView,
     AdminProfilesVerifiedListView,
@@ -23,6 +24,7 @@ urlpatterns = [
     path('dashboard/stats/', AdminDashboardStatsView.as_view(), name='dashboard-stats'),
     
     # Profile verification management
+    path('profiles/all/', AdminProfilesAllListView.as_view(), name='profiles-all'),
     path('profiles/pending/', AdminProfilesPendingListView.as_view(), name='profiles-pending'),
     path('profiles/verified/', AdminProfilesVerifiedListView.as_view(), name='profiles-verified'),
     path('profiles/rejected/', AdminProfilesRejectedListView.as_view(), name='profiles-rejected'),
