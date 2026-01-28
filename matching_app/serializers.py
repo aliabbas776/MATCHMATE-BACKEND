@@ -835,9 +835,9 @@ class ConnectionUserProfileSerializer(serializers.ModelSerializer):
     def get_profile_picture(self, instance):
         request = self.context.get('request')
         
-        # This serializer is ONLY used for connection/friends serialization
-        # So if we're here, we know this profile belongs to an approved friend
-        # Therefore, always show the profile picture if it exists
+        # This serializer is used for connection/friends serialization
+        # Always show profile picture for connections (friends), regardless of is_public setting
+        # Friends should be able to see each other's profile pictures even if profile is private
         if not instance.profile_picture:
             return None
         

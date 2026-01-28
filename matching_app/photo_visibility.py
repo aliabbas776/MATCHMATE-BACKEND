@@ -23,6 +23,13 @@ class ProfilePhotoVisibilityHelper:
         return getattr(self.viewer, 'id', None)
 
     def can_view(self, profile: UserProfile) -> bool:
+        """
+        Determine if the viewer can see the profile picture.
+        Returns True if:
+        - Profile is public, OR
+        - Viewer is the profile owner, OR
+        - Viewer and profile owner have an APPROVED connection (are friends)
+        """
         if not profile.profile_picture:
             return False
         if profile.is_public:
@@ -32,6 +39,8 @@ class ProfilePhotoVisibilityHelper:
             return False
         if profile.user_id == viewer_id:
             return True
+        # Check if viewer and profile owner are connected as friends (APPROVED connection)
+        # This ensures friends can see each other's profile pictures even if profile is private
         return profile.user_id in self._approved_connection_ids
 
     @property
@@ -41,15 +50,22 @@ class ProfilePhotoVisibilityHelper:
         return self._connected_user_ids
 
     def _fetch_connection_ids(self) -> Set[int]:
+        """
+        Fetch all user IDs that have APPROVED connections with the viewer.
+        This means these users are friends with the viewer and should be able
+        to see each other's profile pictures regardless of privacy settings.
+        """
         viewer_id = self._viewer_id
         if viewer_id is None:
             return set()
+        # Get all APPROVED connections where viewer is either sender or receiver
         connections = UserConnection.objects.filter(
             status=UserConnection.Status.APPROVED,
         ).filter(
             Q(from_user_id=viewer_id) | Q(to_user_id=viewer_id)
         )
         connected: Set[int] = set()
+        # Extract the other user's ID from each connection
         for from_id, to_id in connections.values_list('from_user_id', 'to_user_id'):
             if from_id != viewer_id:
                 connected.add(from_id)
