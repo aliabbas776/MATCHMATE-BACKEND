@@ -67,7 +67,9 @@ urlpatterns = [
     path('support/', SupportRequestView.as_view(), name='support-request'),
     # User and Report management ViewSets (production-ready REST APIs)
     path('manage/', include('matching_app.urls_users_reports')),
-
+    
+    # Admin API endpoints (requires is_staff=True)
+    path('admin/', include('matching_app.urls_admin')),
 
 # Google OAuth2 URLs
     path('google/login/', GoogleLoginView.as_view(), name='google-login'),
