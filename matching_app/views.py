@@ -1886,27 +1886,27 @@ def build_google_oauth_authorization_url(request, user_for_state):
     Encodes the provided user's id into the OAuth "state" parameter so that the
     callback can associate the authorization with the correct user.
     """
-        import re
+    import re
     from urllib.parse import urlparse
 
-        credentials_path = settings.BASE_DIR / 'client_secret_90144230544-0fpt13jenpce2hdb7lhhvd89bf3dfa73.apps.googleusercontent.com.json'
+    credentials_path = settings.BASE_DIR / 'client_secret_90144230544-0fpt13jenpce2hdb7lhhvd89bf3dfa73.apps.googleusercontent.com.json'
         
         # Build redirect URI - use configured base URL if set, otherwise use request
-        if hasattr(settings, 'GOOGLE_OAUTH_REDIRECT_BASE_URL') and settings.GOOGLE_OAUTH_REDIRECT_BASE_URL:
+    if hasattr(settings, 'GOOGLE_OAUTH_REDIRECT_BASE_URL') and settings.GOOGLE_OAUTH_REDIRECT_BASE_URL:
             redirect_uri = f"{settings.GOOGLE_OAUTH_REDIRECT_BASE_URL.rstrip('/')}/oauth/callback/"
-        else:
+    else:
             # Use request.build_absolute_uri() to get the full URL including protocol and host
             redirect_uri = request.build_absolute_uri('/oauth/callback/')
 
         # Check if redirect URI uses an IP address (Google doesn't allow IPs)
-        parsed = urlparse(redirect_uri)
-        host = parsed.netloc.split(':')[0]  # Remove port if present
+    parsed = urlparse(redirect_uri)
+    host = parsed.netloc.split(':')[0]  # Remove port if present
         
         # Check if host is an IP address
-        ip_pattern = re.compile(r'^(\d{1,3}\.){3}\d{1,3}$')
-        is_ip_address = ip_pattern.match(host) is not None
+    ip_pattern = re.compile(r'^(\d{1,3}\.){3}\d{1,3}$')
+    is_ip_address = ip_pattern.match(host) is not None
         
-        if is_ip_address and host not in ['localhost', '127.0.0.1']:
+    if is_ip_address and host not in ['localhost', '127.0.0.1']:
         return {
                     'error': 'Invalid redirect URI configuration',
                     'redirect_uri': redirect_uri,
@@ -1928,7 +1928,7 @@ def build_google_oauth_authorization_url(request, user_for_state):
         try:
             from google_auth_oauthlib.flow import Flow
         except ImportError:
-        return {
+            return {
                     'error': 'Google OAuth libraries not installed',
             'message': 'Please install required packages: pip install google-auth-oauthlib google-auth-httplib2 google-api-python-client',
             'invalid_redirect': False,
