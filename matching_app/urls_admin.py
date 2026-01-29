@@ -6,6 +6,8 @@ All endpoints require admin authentication (is_staff=True).
 from django.urls import path
 
 from .views_admin import (
+    AdminCNICListView,
+    AdminCNICVerificationView,
     AdminDashboardStatsView,
     AdminProfileDetailView,
     AdminProfileRejectView,
@@ -32,4 +34,8 @@ urlpatterns = [
     path('profiles/<int:profile_id>/verify/', AdminProfileVerifyView.as_view(), name='profile-verify'),
     path('profiles/<int:profile_id>/reject/', AdminProfileRejectView.as_view(), name='profile-reject'),
     path('profiles/<int:profile_id>/reset-verification/', AdminProfileResetVerificationView.as_view(), name='profile-reset-verification'),
+    
+    # CNIC verification management
+    path('cnic/all/', AdminCNICListView.as_view(), name='cnic-all'),
+    path('cnic/<int:user_id>/', AdminCNICVerificationView.as_view(), name='cnic-by-user'),
 ]

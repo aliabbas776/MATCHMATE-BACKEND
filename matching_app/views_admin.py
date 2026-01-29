@@ -13,9 +13,9 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework.pagination import PageNumberPagination
 
-from .models import UserProfile
+from .models import CNICVerification, UserProfile
 from .permissions import IsStaffOrSuperuser
-from .serializers import UserProfileListSerializer
+from .serializers import CNICVerificationSerializer, UserProfileListSerializer
 
 User = get_user_model()
 
@@ -408,6 +408,118 @@ class AdminProfileDetailView(APIView):
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 
+class AdminCNICVerificationView(APIView):
+    """
+    Admin endpoint to get CNIC verification data for any user.
+    
+    GET /api/admin/cnic/{user_id}/
+    """
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated, IsStaffOrSuperuser]
+    
+    def get(self, request, user_id):
+        # Check if user exists
+        try:
+            user = User.objects.get(id=user_id)
+        except User.DoesNotExist:
+            return Response(
+                {
+                    'error': 'User not found',
+                    'detail': f'User with ID {user_id} does not exist.'
+                },
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        # Get CNIC verification for this user
+        try:
+            verification = CNICVerification.objects.get(user=user)
+            serializer = CNICVerificationSerializer(verification)
+            
+            # Add user info to response
+            data = serializer.data
+            data['user_info'] = {
+                'id': user.id,
+                'username': user.username,
+                'email': user.email,
+                'first_name': user.first_name,
+                'last_name': user.last_name,
+            }
+            
+            return Response(data, status=status.HTTP_200_OK)
+        except CNICVerification.DoesNotExist:
+            return Response(
+                {
+                    'error': 'CNIC not found',
+                    'detail': f'No CNIC verification found for user {user.username} (ID: {user_id}).',
+                    'user_info': {
+                        'id': user.id,
+                        'username': user.username,
+                        'email': user.email,
+                    },
+                    'status': 'not_uploaded'
+                },
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+
+class AdminCNICListView(APIView):
+    """
+    Admin endpoint to list all CNIC verifications with filtering.
+    
+    GET /api/admin/cnic/all/
+    
+    Query params:
+    - status: Filter by verification status (pending/verified/rejected)
+    - tampering_detected: Filter by tampering (true/false)
+    - search: Search by username, email, name, or CNIC number
+    - page: Page number
+    - page_size: Results per page
+    """
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated, IsStaffOrSuperuser]
+    pagination_class = AdminProfilePagination
+    
+    def get(self, request):
+        from django.db.models import Q
+        
+        # Get all CNIC verifications
+        queryset = CNICVerification.objects.select_related('user').order_by('-updated_at')
+        
+        # Filter by status
+        status_param = request.query_params.get('status', '').strip().lower()
+        if status_param in ['pending', 'verified', 'rejected']:
+            queryset = queryset.filter(status=status_param)
+        
+        # Filter by tampering detected
+        tampering = request.query_params.get('tampering_detected', '').strip().lower()
+        if tampering == 'true':
+            queryset = queryset.filter(tampering_detected=True)
+        elif tampering == 'false':
+            queryset = queryset.filter(tampering_detected=False)
+        
+        # Search functionality
+        search = request.query_params.get('search', '').strip()
+        if search:
+            queryset = queryset.filter(
+                Q(user__username__icontains=search) |
+                Q(user__email__icontains=search) |
+                Q(extracted_full_name__icontains=search) |
+                Q(extracted_cnic__icontains=search)
+            )
+        
+        # Paginate
+        paginator = self.pagination_class()
+        page = paginator.paginate_queryset(queryset, request)
+        
+        if page is not None:
+            serializer = CNICVerificationSerializer(page, many=True)
+            return paginator.get_paginated_response(serializer.data)
+        
+        # Fallback without pagination
+        serializer = CNICVerificationSerializer(queryset, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
 class AdminDashboardStatsView(APIView):
     """
     Admin endpoint to get dashboard statistics.
@@ -436,10 +548,20 @@ class AdminDashboardStatsView(APIView):
             staff=Count('id', filter=models.Q(is_staff=True)),
         )
         
+        # CNIC verification stats
+        cnic_stats = CNICVerification.objects.aggregate(
+            total=Count('id'),
+            pending=Count('id', filter=models.Q(status='pending')),
+            verified=Count('id', filter=models.Q(status='verified')),
+            rejected=Count('id', filter=models.Q(status='rejected')),
+            tampering_detected=Count('id', filter=models.Q(tampering_detected=True)),
+        )
+        
         return Response(
             {
                 'profiles': profile_stats,
                 'users': user_stats,
+                'cnic_verifications': cnic_stats,
             },
             status=status.HTTP_200_OK
         )
