@@ -17,7 +17,7 @@ from .views_admin import (
     AdminProfileVerifyView,
 )
 
-app_name = 'admin'
+app_name = 'admin_api'
 
 urlpatterns = [
     # Dashboard
