@@ -798,7 +798,6 @@ class CNICVerificationSerializer(serializers.ModelSerializer):
             'extracted_cnic',
             'extracted_dob',
             'extracted_gender',
-            'extraction_reason',
             'rejection_reason',
             'tampering_detected',
             'blur_score',
