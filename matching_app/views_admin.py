@@ -433,19 +433,8 @@ class AdminCNICVerificationView(APIView):
         # Get CNIC verification for this user
         try:
             verification = CNICVerification.objects.get(user=user)
-            serializer = CNICVerificationSerializer(verification)
-            
-            # Add user info to response
-            data = serializer.data
-            data['user_info'] = {
-                'id': user.id,
-                'username': user.username,
-                'email': user.email,
-                'first_name': user.first_name,
-                'last_name': user.last_name,
-            }
-            
-            return Response(data, status=status.HTTP_200_OK)
+            serializer = CNICVerificationSerializer(verification, context={'request': request})
+            return Response(serializer.data, status=status.HTTP_200_OK)
         except CNICVerification.DoesNotExist:
             return Response(
                 {
@@ -512,11 +501,11 @@ class AdminCNICListView(APIView):
         page = paginator.paginate_queryset(queryset, request)
         
         if page is not None:
-            serializer = CNICVerificationSerializer(page, many=True)
+            serializer = CNICVerificationSerializer(page, many=True, context={'request': request})
             return paginator.get_paginated_response(serializer.data)
         
         # Fallback without pagination
-        serializer = CNICVerificationSerializer(queryset, many=True)
+        serializer = CNICVerificationSerializer(queryset, many=True, context={'request': request})
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 
