@@ -1890,74 +1890,74 @@ def build_google_oauth_authorization_url(request, user_for_state):
     from urllib.parse import urlparse
 
     credentials_path = settings.BASE_DIR / 'client_secret_90144230544-0fpt13jenpce2hdb7lhhvd89bf3dfa73.apps.googleusercontent.com.json'
-        
-        # Build redirect URI - use configured base URL if set, otherwise use request
+    
+    # Build redirect URI - use configured base URL if set, otherwise use request
     if hasattr(settings, 'GOOGLE_OAUTH_REDIRECT_BASE_URL') and settings.GOOGLE_OAUTH_REDIRECT_BASE_URL:
-            redirect_uri = f"{settings.GOOGLE_OAUTH_REDIRECT_BASE_URL.rstrip('/')}/oauth/callback/"
+        redirect_uri = f"{settings.GOOGLE_OAUTH_REDIRECT_BASE_URL.rstrip('/')}/oauth/callback/"
     else:
-            # Use request.build_absolute_uri() to get the full URL including protocol and host
-            redirect_uri = request.build_absolute_uri('/oauth/callback/')
+        # Use request.build_absolute_uri() to get the full URL including protocol and host
+        redirect_uri = request.build_absolute_uri('/oauth/callback/')
 
-        # Check if redirect URI uses an IP address (Google doesn't allow IPs)
+    # Check if redirect URI uses an IP address (Google doesn't allow IPs)
     parsed = urlparse(redirect_uri)
     host = parsed.netloc.split(':')[0]  # Remove port if present
-        
-        # Check if host is an IP address
+    
+    # Check if host is an IP address
     ip_pattern = re.compile(r'^(\d{1,3}\.){3}\d{1,3}$')
     is_ip_address = ip_pattern.match(host) is not None
-        
+    
     if is_ip_address and host not in ['localhost', '127.0.0.1']:
         return {
-                    'error': 'Invalid redirect URI configuration',
-                    'redirect_uri': redirect_uri,
-                    'issue': (
-                        'Google OAuth does not allow IP addresses as redirect URIs. '
-                        'You must use a domain name (e.g., example.com) instead of an IP address.'
-                    ),
-                    'solutions': [
-                        '1. Set up a domain name and point it to your server IP (44.220.158.223)',
-                        '2. Add the domain redirect URI to Google Cloud Console (e.g., http://yourdomain.com/oauth/callback/)',
-                        '3. Configure GOOGLE_OAUTH_REDIRECT_BASE_URL in settings.py to use your domain',
-                        '4. For testing, use localhost: http://localhost:8000/oauth/callback/ (already configured)',
-                        '5. Alternative: Use a service like ngrok for temporary testing (not recommended for production)'
-                    ],
-                    'current_host': host,
+            'error': 'Invalid redirect URI configuration',
+            'redirect_uri': redirect_uri,
+            'issue': (
+                'Google OAuth does not allow IP addresses as redirect URIs. '
+                'You must use a domain name (e.g., example.com) instead of an IP address.'
+            ),
+            'solutions': [
+                '1. Set up a domain name and point it to your server IP (44.220.158.223)',
+                '2. Add the domain redirect URI to Google Cloud Console (e.g., http://yourdomain.com/oauth/callback/)',
+                '3. Configure GOOGLE_OAUTH_REDIRECT_BASE_URL in settings.py to use your domain',
+                '4. For testing, use localhost: http://localhost:8000/oauth/callback/ (already configured)',
+                '5. Alternative: Use a service like ngrok for temporary testing (not recommended for production)'
+            ],
+            'current_host': host,
             'invalid_redirect': True,
         }
 
-        try:
-            from google_auth_oauthlib.flow import Flow
-        except ImportError:
-            return {
-                    'error': 'Google OAuth libraries not installed',
+    try:
+        from google_auth_oauthlib.flow import Flow
+    except ImportError:
+        return {
+            'error': 'Google OAuth libraries not installed',
             'message': 'Please install required packages: pip install google-auth-oauthlib google-auth-httplib2 google-api-python-client',
             'invalid_redirect': False,
         }
-        
-        flow = Flow.from_client_secrets_file(
-            credentials_path,
-            scopes=['https://www.googleapis.com/auth/calendar.events'],
-            redirect_uri=redirect_uri
-        )
+    
+    flow = Flow.from_client_secrets_file(
+        credentials_path,
+        scopes=['https://www.googleapis.com/auth/calendar.events'],
+        redirect_uri=redirect_uri
+    )
 
-        auth_url, state = flow.authorization_url(
-            prompt='consent',
-            access_type='offline',
-            include_granted_scopes='true',
+    auth_url, state = flow.authorization_url(
+        prompt='consent',
+        access_type='offline',
+        include_granted_scopes='true',
         state=str(user_for_state.id),
-        )
+    )
 
     return {
-                'success': True,
-                'auth_url': auth_url,
+        'success': True,
+        'auth_url': auth_url,
         'redirect_uri': redirect_uri,
-                'instructions': (
-                    'IMPORTANT: Make sure this redirect_uri is registered in Google Cloud Console. '
-                    'Go to: APIs & Services > Credentials > Your OAuth 2.0 Client > Authorized redirect URIs. '
-                    'Note: Google does not allow IP addresses - you must use a domain name.'
+        'instructions': (
+            'IMPORTANT: Make sure this redirect_uri is registered in Google Cloud Console. '
+            'Go to: APIs & Services > Credentials > Your OAuth 2.0 Client > Authorized redirect URIs. '
+            'Note: Google does not allow IP addresses - you must use a domain name.'
         ),
         'invalid_redirect': False,
-            }
+    }
 
 
 class GoogleLoginView(APIView):
