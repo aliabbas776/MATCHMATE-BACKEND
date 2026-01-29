@@ -781,20 +781,59 @@ class MatchPreferenceSerializer(serializers.ModelSerializer):
 
 
 class CNICVerificationSerializer(serializers.ModelSerializer):
+    front_image = serializers.SerializerMethodField()
+    back_image = serializers.SerializerMethodField()
+    user_info = serializers.SerializerMethodField()
+    
     class Meta:
         model = CNICVerification
         fields = [
+            'id',
+            'user',
+            'user_info',
+            'front_image',
+            'back_image',
             'status',
             'extracted_full_name',
             'extracted_cnic',
             'extracted_dob',
             'extracted_gender',
+            'extraction_reason',
             'rejection_reason',
             'tampering_detected',
             'blur_score',
             'updated_at',
         ]
         read_only_fields = fields
+    
+    def get_front_image(self, obj):
+        """Return absolute URL for front CNIC image."""
+        if not obj.front_image:
+            return None
+        request = self.context.get('request')
+        if request:
+            return request.build_absolute_uri(obj.front_image.url)
+        return obj.front_image.url
+    
+    def get_back_image(self, obj):
+        """Return absolute URL for back CNIC image."""
+        if not obj.back_image:
+            return None
+        request = self.context.get('request')
+        if request:
+            return request.build_absolute_uri(obj.back_image.url)
+        return obj.back_image.url
+    
+    def get_user_info(self, obj):
+        """Return basic user information."""
+        user = obj.user
+        return {
+            'id': user.id,
+            'username': user.username,
+            'email': user.email,
+            'first_name': user.first_name,
+            'last_name': user.last_name,
+        }
 
 
 class ConnectionUserProfileSerializer(serializers.ModelSerializer):
